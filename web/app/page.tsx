@@ -1,41 +1,140 @@
-const stats = [
-  {
-    label: "Total Stock",
-    value: "14,886",
-    description: "Seluruh stok gudang",
-  },
-  {
-    label: "Normal",
-    value: "12,562",
-    description: "Stok siap jual",
-  },
-  {
-    label: "Defect",
-    value: "2,321",
-    description: "Stok perlu pengecekan",
-  },
-  {
-    label: "Reject",
-    value: "3",
-    description: "Stok reject",
-  },
-];
+import { redirect } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
 
-const summary = [
-  { label: "Products", value: "785" },
-  { label: "SKU / Variants", value: "3,743" },
-  { label: "Warehouse", value: "1" },
-  { label: "Stock Areas", value: "3" },
-];
+export const dynamic = "force-dynamic";
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createClient();
+
+  // 1. Cek user login
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  // 2. Ambil data inventory + area gudang
+  const { data: stockAreaData, error: stockAreaError } =
+  await supabase.rpc("get_stock_by_area");
+
+  // 3. Hitung jumlah master data
+  const [
+    productsResult,
+    variantsResult,
+    warehousesResult,
+    stockAreasResult,
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id", { count: "exact", head: true }),
+
+    supabase
+      .from("product_variants")
+      .select("id", { count: "exact", head: true }),
+
+    supabase
+      .from("warehouses")
+      .select("id", { count: "exact", head: true }),
+
+    supabase
+      .from("stock_areas")
+      .select("id", { count: "exact", head: true }),
+  ]);
+
+  if (stockAreaError) {
+  throw new Error(`Stock area error: ${stockAreaError.message}`);
+}
+
+const normalStock = Number(
+  stockAreaData?.find((row) => row.stock_area === "NORMAL")?.total_qty ?? 0
+);
+
+const defectStock = Number(
+  stockAreaData?.find((row) => row.stock_area === "DEFECT")?.total_qty ?? 0
+);
+
+const rejectStock = Number(
+  stockAreaData?.find((row) => row.stock_area === "REJECT")?.total_qty ?? 0
+);
+
+const totalStock = normalStock + defectStock + rejectStock;
+
+  const formatNumber = (value: number) =>
+    value.toLocaleString("id-ID");
+
+  const stats = [
+    {
+      label: "Total Stock",
+      value: formatNumber(totalStock),
+      description: "Seluruh stok gudang",
+    },
+    {
+      label: "Normal",
+      value: formatNumber(normalStock),
+      description: "Stok siap jual",
+    },
+    {
+      label: "Defect",
+      value: formatNumber(defectStock),
+      description: "Stok perlu pengecekan",
+    },
+    {
+      label: "Reject",
+      value: formatNumber(rejectStock),
+      description: "Stok reject",
+    },
+  ];
+
+  const summary = [
+    {
+      label: "Products",
+      value: formatNumber(productsResult.count ?? 0),
+    },
+    {
+      label: "SKU / Variants",
+      value: formatNumber(variantsResult.count ?? 0),
+    },
+    {
+      label: "Warehouse",
+      value: formatNumber(warehousesResult.count ?? 0),
+    },
+    {
+      label: "Stock Areas",
+      value: formatNumber(stockAreasResult.count ?? 0),
+    },
+  ];
+
+  const stockAreaRows = [
+    {
+      area: "NORMAL",
+      description: "Area Stok Normal / Siap Jual",
+      quantity: normalStock,
+    },
+    {
+      area: "DEFECT",
+      description: "Area Stok Defect",
+      quantity: defectStock,
+    },
+    {
+      area: "REJECT",
+      description: "Area Stok Reject",
+      quantity: rejectStock,
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
-        {/* Sidebar */}
+
+        {/* SIDEBAR */}
         <aside className="hidden w-64 border-r border-slate-200 bg-white p-6 lg:block">
           <div className="mb-10">
-            <div className="text-xl font-bold tracking-tight">Hi.PRIMA</div>
+            <div className="text-xl font-bold tracking-tight">
+              Hi.PRIMA
+            </div>
+
             <div className="text-sm text-slate-500">
               Warehouse Management System
             </div>
@@ -68,9 +167,10 @@ export default function Home() {
           </nav>
         </aside>
 
-        {/* Main Content */}
+        {/* MAIN */}
         <main className="flex-1 p-6 md:p-10">
           <div className="mx-auto max-w-7xl">
+
             <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
                 <p className="mb-1 text-sm font-medium text-slate-500">
@@ -82,7 +182,7 @@ export default function Home() {
                 </h1>
 
                 <p className="mt-2 text-sm text-slate-500">
-                  Monitoring stok Hi.PRIMA
+                  Monitoring stok Hi.PRIMA • Live Database
                 </p>
               </div>
 
@@ -91,7 +191,7 @@ export default function Home() {
               </div>
             </header>
 
-            {/* Stock Cards */}
+            {/* STOCK CARDS */}
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {stats.map((item) => (
                 <div
@@ -113,10 +213,13 @@ export default function Home() {
               ))}
             </section>
 
-            {/* Summary */}
+            {/* SUMMARY */}
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-6">
-                <h2 className="text-lg font-semibold">Warehouse Summary</h2>
+                <h2 className="text-lg font-semibold">
+                  Warehouse Summary
+                </h2>
+
                 <p className="text-sm text-slate-500">
                   Ringkasan data master WMS
                 </p>
@@ -128,17 +231,25 @@ export default function Home() {
                     key={item.label}
                     className="rounded-xl bg-slate-50 p-5"
                   >
-                    <p className="text-sm text-slate-500">{item.label}</p>
-                    <p className="mt-2 text-2xl font-semibold">{item.value}</p>
+                    <p className="text-sm text-slate-500">
+                      {item.label}
+                    </p>
+
+                    <p className="mt-2 text-2xl font-semibold">
+                      {item.value}
+                    </p>
                   </div>
                 ))}
               </div>
             </section>
 
-            {/* Stock Area Table */}
+            {/* STOCK AREA */}
             <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 p-6">
-                <h2 className="text-lg font-semibold">Stock by Area</h2>
+                <h2 className="text-lg font-semibold">
+                  Stock by Area
+                </h2>
+
                 <p className="text-sm text-slate-500">
                   Kondisi stok berdasarkan area gudang
                 </p>
@@ -148,8 +259,14 @@ export default function Home() {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
-                      <th className="px-6 py-4 font-medium">Area</th>
-                      <th className="px-6 py-4 font-medium">Description</th>
+                      <th className="px-6 py-4 font-medium">
+                        Area
+                      </th>
+
+                      <th className="px-6 py-4 font-medium">
+                        Description
+                      </th>
+
                       <th className="px-6 py-4 text-right font-medium">
                         Quantity
                       </th>
@@ -157,39 +274,26 @@ export default function Home() {
                   </thead>
 
                   <tbody className="divide-y divide-slate-100">
-                    <tr>
-                      <td className="px-6 py-4 font-medium">NORMAL</td>
-                      <td className="px-6 py-4 text-slate-500">
-                        Area Stok Normal / Siap Jual
-                      </td>
-                      <td className="px-6 py-4 text-right font-semibold">
-                        12,562
-                      </td>
-                    </tr>
+                    {stockAreaRows.map((item) => (
+                      <tr key={item.area}>
+                        <td className="px-6 py-4 font-medium">
+                          {item.area}
+                        </td>
 
-                    <tr>
-                      <td className="px-6 py-4 font-medium">DEFECT</td>
-                      <td className="px-6 py-4 text-slate-500">
-                        Area Stok Defect
-                      </td>
-                      <td className="px-6 py-4 text-right font-semibold">
-                        2,321
-                      </td>
-                    </tr>
+                        <td className="px-6 py-4 text-slate-500">
+                          {item.description}
+                        </td>
 
-                    <tr>
-                      <td className="px-6 py-4 font-medium">REJECT</td>
-                      <td className="px-6 py-4 text-slate-500">
-                        Area Stok Reject
-                      </td>
-                      <td className="px-6 py-4 text-right font-semibold">
-                        3
-                      </td>
-                    </tr>
+                        <td className="px-6 py-4 text-right font-semibold">
+                          {formatNumber(item.quantity)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </section>
+
           </div>
         </main>
       </div>
