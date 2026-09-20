@@ -4,36 +4,38 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type LocationRow = {
-  location_id: string;
-  location_code: string;
-  location_name: string;
-  area_code: string;
-  area_name: string;
-  is_active: boolean;
-  sku_count: number;
+type ProductRow = {
+  product_id: string;
+  product_code: string;
+  product_name: string;
+  brand: string | null;
+  variant_count: number;
   total_qty: number;
   total_count: number;
 };
 
-type LocationInventoryRow = {
+type VariantRow = {
   variant_id: string;
   sku: string;
-  product_code: string;
-  product_name: string;
-  brand: string | null;
   color: string | null;
   size: string | null;
-  qty: number;
+  barcode: string | null;
+  normal_qty: number;
+  defect_qty: number;
+  reject_qty: number;
+  total_qty: number;
+  normal_locations: string | null;
+  defect_locations: string | null;
+  reject_locations: string | null;
 };
 
-export default async function LocationsPage({
+export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<{
     q?: string;
     page?: string;
-    location?: string;
+    product?: string;
   }>;
 }) {
   const supabase = await createClient();
@@ -49,101 +51,87 @@ export default async function LocationsPage({
   const params = await searchParams;
 
   const search = params.q?.trim() ?? "";
-  const locationId = params.location ?? "";
+  const productId = params.product ?? "";
   const currentPage = Math.max(Number(params.page ?? "1") || 1, 1);
 
   const pageSize = 50;
   const offset = (currentPage - 1) * pageSize;
 
-  const { data, error } = await supabase.rpc("get_locations_summary", {
+  const { data, error } = await supabase.rpc("get_products_list", {
     p_search: search || null,
     p_limit: pageSize,
     p_offset: offset,
   });
 
   if (error) {
-    throw new Error(`Locations error: ${error.message}`);
+    throw new Error(`Products error: ${error.message}`);
   }
 
-  const locations = (data ?? []) as LocationRow[];
+  const products = (data ?? []) as ProductRow[];
 
-  const totalCount = Number(locations[0]?.total_count ?? 0);
+  const totalCount = Number(products[0]?.total_count ?? 0);
   const totalPages = Math.max(Math.ceil(totalCount / pageSize), 1);
 
-  let selectedLocation: LocationRow | null = null;
-  let locationInventory: LocationInventoryRow[] = [];
+  let selectedProduct: ProductRow | null = null;
+  let variants: VariantRow[] = [];
 
-  if (locationId) {
-    selectedLocation =
-      locations.find((item) => item.location_id === locationId) ?? null;
+  if (productId) {
+    selectedProduct =
+      products.find((item) => item.product_id === productId) ?? null;
 
-    if (!selectedLocation) {
-      const { data: locationData } = await supabase
-        .from("locations")
-        .select(`
-          id,
-          code,
-          name,
-          is_active,
-          stock_areas (
-            code,
-            name
-          )
-        `)
-        .eq("id", locationId)
+    if (!selectedProduct) {
+      const { data: productData } = await supabase
+        .from("products")
+        .select("id, product_code, name, brand")
+        .eq("id", productId)
         .single();
 
-      if (locationData) {
-        const area = Array.isArray(locationData.stock_areas)
-          ? locationData.stock_areas[0]
-          : locationData.stock_areas;
-
-        selectedLocation = {
-          location_id: locationData.id,
-          location_code: locationData.code,
-          location_name: locationData.name,
-          area_code: area?.code ?? "-",
-          area_name: area?.name ?? "-",
-          is_active: locationData.is_active,
-          sku_count: 0,
+      if (productData) {
+        selectedProduct = {
+          product_id: productData.id,
+          product_code: productData.product_code,
+          product_name: productData.name,
+          brand: productData.brand,
+          variant_count: 0,
           total_qty: 0,
           total_count: 0,
         };
       }
     }
 
-    const { data: inventoryData, error: inventoryError } =
-      await supabase.rpc("get_location_inventory", {
-        p_location_id: locationId,
+    const { data: variantData, error: variantError } =
+      await supabase.rpc("get_product_variants", {
+        p_product_id: productId,
       });
 
-    if (inventoryError) {
+    if (variantError) {
       throw new Error(
-        `Location inventory error: ${inventoryError.message}`
+        `Product variants error: ${variantError.message}`
       );
     }
 
-    locationInventory =
-      (inventoryData ?? []) as LocationInventoryRow[];
+    variants = (variantData ?? []) as VariantRow[];
   }
 
   const formatNumber = (value: number) =>
     Number(value ?? 0).toLocaleString("id-ID");
-const makePageUrl = (page: number) => {
-  const query = new URLSearchParams();
 
-  if (search) {
-    query.set("q", search);
-  }
-
-  query.set("page", String(page));
-
-  return `/locations?${query.toString()}`;
-};
-  const detailTotalQty = locationInventory.reduce(
-    (total, item) => total + Number(item.qty ?? 0),
+  const detailTotalQty = variants.reduce(
+    (total, item) => total + Number(item.total_qty ?? 0),
     0
   );
+
+  const makePageUrl = (page: number) => {
+    const query = new URLSearchParams();
+
+    if (search) {
+      query.set("q", search);
+    }
+
+    query.set("page", String(page));
+
+    return `/products?${query.toString()}`;
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -152,7 +140,10 @@ const makePageUrl = (page: number) => {
         {/* SIDEBAR */}
         <aside className="hidden w-64 border-r border-slate-200 bg-white p-6 lg:block">
           <div className="mb-10">
-            <div className="text-xl font-bold">Hi.PRIMA</div>
+            <div className="text-xl font-bold">
+              Hi.PRIMA
+            </div>
+
             <div className="text-sm text-slate-500">
               Warehouse Management System
             </div>
@@ -167,11 +158,11 @@ const makePageUrl = (page: number) => {
             </Link>
 
             <Link
-  href="/products"
-  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
->
-  Products
-</Link>
+              href="/products"
+              className="block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
+            >
+              Products
+            </Link>
 
             <Link
               href="/inventory"
@@ -186,7 +177,7 @@ const makePageUrl = (page: number) => {
 
             <Link
               href="/locations"
-              className="block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
+              className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
               Locations
             </Link>
@@ -197,117 +188,156 @@ const makePageUrl = (page: number) => {
           </nav>
         </aside>
 
-        {/* MAIN */}
         <main className="flex-1 p-6 md:p-10">
           <div className="mx-auto max-w-[1500px]">
 
-            <div className="mb-8">
+            <header className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
               <h1 className="mt-1 text-3xl font-bold">
-                Locations
+                Products
               </h1>
 
               <p className="mt-2 text-sm text-slate-500">
-                Monitoring lokasi rak dan isi stok gudang
+                Master produk dan variant Hi.PRIMA
               </p>
-            </div>
+            </header>
 
-            {/* DETAIL LOCATION */}
-            {selectedLocation && (
+            {/* PRODUCT DETAIL */}
+            {selectedProduct && (
               <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
                 <div className="mb-6 flex items-start justify-between">
                   <div>
                     <div className="text-sm text-slate-500">
-                      Location Detail
+                      Product Detail
                     </div>
 
                     <h2 className="mt-1 text-2xl font-bold">
-                      {selectedLocation.location_code}
+                      {selectedProduct.product_name}
                     </h2>
 
                     <div className="mt-1 text-sm text-slate-500">
-                      {selectedLocation.location_name}
+                      {selectedProduct.product_code}
+                      {" • "}
+                      {selectedProduct.brand ?? "-"}
                     </div>
                   </div>
 
                   <Link
-                    href="/locations"
+                    href="/products"
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
                   >
                     Close
                   </Link>
                 </div>
 
-                <div className="mb-6 grid gap-4 sm:grid-cols-3">
-
+                <div className="mb-6 grid gap-4 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-50 p-4">
                     <div className="text-sm text-slate-500">
-                      Area
+                      Variants / SKU
                     </div>
-                    <div className="mt-2 font-semibold">
-                      {selectedLocation.area_code}
-                    </div>
-                  </div>
 
-                  <div className="rounded-xl bg-slate-50 p-4">
-                    <div className="text-sm text-slate-500">
-                      SKU
-                    </div>
                     <div className="mt-2 text-xl font-bold">
-                      {formatNumber(locationInventory.length)}
+                      {formatNumber(variants.length)}
                     </div>
                   </div>
 
                   <div className="rounded-xl bg-slate-50 p-4">
                     <div className="text-sm text-slate-500">
-                      Total Qty
+                      Total Stock
                     </div>
+
                     <div className="mt-2 text-xl font-bold">
                       {formatNumber(detailTotalQty)}
                     </div>
                   </div>
-
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full min-w-[1100px] text-left text-sm">
 
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
                         <th className="px-4 py-3">SKU</th>
-                        <th className="px-4 py-3">Product</th>
                         <th className="px-4 py-3">Variant</th>
                         <th className="px-4 py-3 text-right">
-                          Qty
+                          Normal
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          Defect
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          Reject
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          Total
+                        </th>
+                        <th className="px-4 py-3">
+                          Location
                         </th>
                       </tr>
                     </thead>
 
                     <tbody className="divide-y divide-slate-100">
-                      {locationInventory.map((item) => (
-                        <tr key={item.variant_id}>
+                      {variants.map((variant) => (
+                        <tr key={variant.variant_id}>
                           <td className="px-4 py-3 font-semibold">
-                            {item.sku}
+                            {variant.sku}
                           </td>
 
                           <td className="px-4 py-3">
-                            <div>{item.product_name}</div>
+                            <div>{variant.color ?? "-"}</div>
 
                             <div className="text-xs text-slate-400">
-                              {item.product_code}
+                              Size: {variant.size ?? "-"}
                             </div>
                           </td>
 
-                          <td className="px-4 py-3">
-                            {item.color ?? "-"} / {item.size ?? "-"}
+                          <td className="px-4 py-3 text-right">
+                            {formatNumber(variant.normal_qty)}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            {formatNumber(variant.defect_qty)}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            {formatNumber(variant.reject_qty)}
                           </td>
 
                           <td className="px-4 py-3 text-right font-bold">
-                            {formatNumber(item.qty)}
+                            {formatNumber(variant.total_qty)}
+                          </td>
+
+                          <td className="px-4 py-3 text-xs">
+                            {variant.normal_locations && (
+                              <div>
+                                N: {variant.normal_locations}
+                              </div>
+                            )}
+
+                            {variant.defect_locations && (
+                              <div className="text-amber-700">
+                                D: {variant.defect_locations}
+                              </div>
+                            )}
+
+                            {variant.reject_locations && (
+                              <div className="text-red-700">
+                                R: {variant.reject_locations}
+                              </div>
+                            )}
+
+                            {!variant.normal_locations &&
+                              !variant.defect_locations &&
+                              !variant.reject_locations && (
+                                <span className="text-slate-400">
+                                  -
+                                </span>
+                              )}
                           </td>
                         </tr>
                       ))}
@@ -321,15 +351,16 @@ const makePageUrl = (page: number) => {
 
             {/* SEARCH */}
             <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
               <form
-                action="/locations"
+                action="/products"
                 method="GET"
                 className="flex gap-3"
               >
                 <input
                   name="q"
                   defaultValue={search}
-                  placeholder="Cari kode rak, nama lokasi, NORMAL, DEFECT..."
+                  placeholder="Cari kode produk, nama produk, atau brand..."
                   className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm"
                 />
 
@@ -339,26 +370,27 @@ const makePageUrl = (page: number) => {
 
                 {search && (
                   <Link
-                    href="/locations"
+                    href="/products"
                     className="rounded-xl border border-slate-300 px-5 py-3 text-sm"
                   >
                     Reset
                   </Link>
                 )}
               </form>
+
             </section>
 
-            {/* LOCATION LIST */}
+            {/* PRODUCT LIST */}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
               <div className="flex justify-between border-b border-slate-200 p-6">
                 <div>
                   <h2 className="text-lg font-semibold">
-                    Location List
+                    Product List
                   </h2>
 
                   <p className="text-sm text-slate-500">
-                    {formatNumber(totalCount)} lokasi ditemukan
+                    {formatNumber(totalCount)} produk ditemukan
                   </p>
                 </div>
 
@@ -372,57 +404,58 @@ const makePageUrl = (page: number) => {
 
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
-                      <th className="px-5 py-4">Location</th>
-                      <th className="px-5 py-4">Area</th>
-                      <th className="px-5 py-4 text-right">
-                        SKU
+                      <th className="px-5 py-4">
+                        Product
                       </th>
-                      <th className="px-5 py-4 text-right">
-                        Qty
+
+                      <th className="px-5 py-4">
+                        Brand
                       </th>
-                      <th className="px-5 py-4">Status</th>
+
+                      <th className="px-5 py-4 text-right">
+                        Variants
+                      </th>
+
+                      <th className="px-5 py-4 text-right">
+                        Stock
+                      </th>
+
                       <th className="px-5 py-4"></th>
                     </tr>
                   </thead>
 
                   <tbody className="divide-y divide-slate-100">
 
-                    {locations.map((location) => (
+                    {products.map((product) => (
                       <tr
-                        key={location.location_id}
+                        key={product.product_id}
                         className="hover:bg-slate-50"
                       >
                         <td className="px-5 py-4">
                           <div className="font-semibold">
-                            {location.location_code}
+                            {product.product_name}
                           </div>
 
                           <div className="text-xs text-slate-400">
-                            {location.location_name}
+                            {product.product_code}
                           </div>
                         </td>
 
                         <td className="px-5 py-4">
-                          {location.area_code}
+                          {product.brand ?? "-"}
                         </td>
 
                         <td className="px-5 py-4 text-right">
-                          {formatNumber(location.sku_count)}
+                          {formatNumber(product.variant_count)}
                         </td>
 
                         <td className="px-5 py-4 text-right font-semibold">
-                          {formatNumber(location.total_qty)}
-                        </td>
-
-                        <td className="px-5 py-4">
-                          {location.is_active
-                            ? "Active"
-                            : "Inactive"}
+                          {formatNumber(product.total_qty)}
                         </td>
 
                         <td className="px-5 py-4 text-right">
                           <Link
-                            href={`/locations?location=${location.location_id}`}
+                            href={`/products?product=${product.product_id}`}
                             className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium"
                           >
                             View
@@ -434,40 +467,45 @@ const makePageUrl = (page: number) => {
                   </tbody>
                 </table>
               </div>
-{/* PAGINATION */}
-<div className="flex items-center justify-between border-t border-slate-200 p-5">
-  <div className="text-sm text-slate-500">
-    Menampilkan maksimal {pageSize} lokasi per halaman
-  </div>
 
-  <div className="flex gap-2">
-    {currentPage > 1 ? (
-      <Link
-        href={makePageUrl(currentPage - 1)}
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
-      >
-        Previous
-      </Link>
-    ) : (
-      <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
-        Previous
-      </span>
-    )}
+              {/* PAGINATION */}
+              <div className="flex items-center justify-between border-t border-slate-200 p-5">
 
-    {currentPage < totalPages ? (
-      <Link
-        href={makePageUrl(currentPage + 1)}
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
-      >
-        Next
-      </Link>
-    ) : (
-      <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
-        Next
-      </span>
-    )}
-  </div>
-</div>
+                <div className="text-sm text-slate-500">
+                  Menampilkan maksimal {pageSize} produk per halaman
+                </div>
+
+                <div className="flex gap-2">
+
+                  {currentPage > 1 ? (
+                    <Link
+                      href={makePageUrl(currentPage - 1)}
+                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
+                    >
+                      Previous
+                    </Link>
+                  ) : (
+                    <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
+                      Previous
+                    </span>
+                  )}
+
+                  {currentPage < totalPages ? (
+                    <Link
+                      href={makePageUrl(currentPage + 1)}
+                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
+                    >
+                      Next
+                    </Link>
+                  ) : (
+                    <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
+                      Next
+                    </span>
+                  )}
+
+                </div>
+              </div>
+
             </section>
 
           </div>

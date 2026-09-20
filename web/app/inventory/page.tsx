@@ -103,9 +103,12 @@ export default async function InventoryPage({
               Dashboard
             </Link>
 
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Products
-            </div>
+            <Link
+  href="/products"
+  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
+>
+  Products
+</Link>
 
             <Link
               href="/inventory"
