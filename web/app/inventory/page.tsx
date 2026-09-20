@@ -118,9 +118,12 @@ export default async function InventoryPage({
               Stock Movement
             </div>
 
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Locations
-            </div>
+            <Link
+  href="/locations"
+  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
+>
+  Locations
+</Link>
 
             <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
               Users
@@ -293,27 +296,76 @@ export default async function InventoryPage({
                         </td>
 
                         <td className="px-5 py-4 text-xs">
-                          <div>
-                            <span className="font-medium">
-                              N:
-                            </span>{" "}
-                            {row.normal_locations ?? "-"}
-                          </div>
+  <div className="space-y-3">
 
-                          <div className="mt-1">
-                            <span className="font-medium">
-                              D:
-                            </span>{" "}
-                            {row.defect_locations ?? "-"}
-                          </div>
+    {/* NORMAL */}
+    <div>
+      <div className="mb-1 font-semibold text-slate-700">
+        NORMAL
+      </div>
 
-                          <div className="mt-1">
-                            <span className="font-medium">
-                              R:
-                            </span>{" "}
-                            {row.reject_locations ?? "-"}
-                          </div>
-                        </td>
+      {row.normal_locations ? (
+        <div className="space-y-1">
+          {row.normal_locations.split(", ").map((location) => (
+            <div
+              key={location}
+              className="rounded-md bg-slate-50 px-2 py-1 text-slate-700"
+            >
+              {location}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-slate-400">-</div>
+      )}
+    </div>
+
+    {/* DEFECT */}
+    {row.defect_qty > 0 && (
+      <div>
+        <div className="mb-1 font-semibold text-amber-700">
+          DEFECT
+        </div>
+
+        <div className="space-y-1">
+          {row.defect_locations
+            ?.split(", ")
+            .map((location) => (
+              <div
+                key={location}
+                className="rounded-md bg-amber-50 px-2 py-1 text-amber-800"
+              >
+                {location}
+              </div>
+            ))}
+        </div>
+      </div>
+    )}
+
+    {/* REJECT */}
+    {row.reject_qty > 0 && (
+      <div>
+        <div className="mb-1 font-semibold text-red-700">
+          REJECT
+        </div>
+
+        <div className="space-y-1">
+          {row.reject_locations
+            ?.split(", ")
+            .map((location) => (
+              <div
+                key={location}
+                className="rounded-md bg-red-50 px-2 py-1 text-red-800"
+              >
+                {location}
+              </div>
+            ))}
+        </div>
+      </div>
+    )}
+
+  </div>
+</td>
                       </tr>
                     ))}
 

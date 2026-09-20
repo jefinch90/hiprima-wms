@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 
@@ -149,17 +150,23 @@ const totalStock = normalStock + defectStock + rejectStock;
               Products
             </div>
 
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Inventory
-            </div>
+            <Link
+  href="/inventory"
+  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
+>
+  Inventory
+</Link>
 
             <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
               Stock Movement
             </div>
 
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Locations
-            </div>
+            <Link
+  href="/locations"
+  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
+>
+  Locations
+</Link>
 
             <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
               Users
