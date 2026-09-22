@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import Sidebar from "@/components/Sidebar";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,7 @@ export default async function InventoryPage({
   const params = await searchParams;
 
   const search = params.q?.trim() ?? "";
+
   const currentPage = Math.max(
     Number(params.page ?? "1") || 1,
     1
@@ -65,10 +67,13 @@ export default async function InventoryPage({
   );
 
   if (error) {
-    throw new Error(`Inventory error: ${error.message}`);
+    throw new Error(
+      `Inventory error: ${error.message}`
+    );
   }
 
-  const inventory = (data ?? []) as InventoryRow[];
+  const inventory =
+    (data ?? []) as InventoryRow[];
 
   const totalCount = Number(
     inventory[0]?.total_count ?? 0
@@ -80,16 +85,22 @@ export default async function InventoryPage({
   );
 
   const formatNumber = (value: number) =>
-    Number(value ?? 0).toLocaleString("id-ID");
+    Number(value ?? 0).toLocaleString(
+      "id-ID"
+    );
 
   const makePageUrl = (page: number) => {
-    const query = new URLSearchParams();
+    const query =
+      new URLSearchParams();
 
     if (search) {
       query.set("q", search);
     }
 
-    query.set("page", String(page));
+    query.set(
+      "page",
+      String(page)
+    );
 
     return `/inventory?${query.toString()}`;
   };
@@ -128,77 +139,25 @@ export default async function InventoryPage({
             {value}
           </div>
         ) : (
-          <div className="text-xs text-slate-400">-</div>
+          <div className="text-xs text-slate-400">
+            -
+          </div>
         )}
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900">
-      <div className="flex min-h-screen">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
 
-        {/* SIDEBAR */}
-        <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white p-6 lg:block">
-          <div className="mb-10">
-            <div className="text-xl font-bold">
-              Hi.PRIMA
-            </div>
+      <div className="flex min-h-screen w-full max-w-full">
 
-            <div className="text-sm text-slate-500">
-              Warehouse Management System
-            </div>
-          </div>
+        <Sidebar />
 
-          <nav className="space-y-2">
+        <main className="min-w-0 max-w-full flex-1 p-6 md:p-10">
 
-            <Link
-              href="/"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              Dashboard
-            </Link>
+          <div className="mx-auto w-full min-w-0 max-w-[1500px]">
 
-            <Link
-              href="/products"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              Products
-            </Link>
-
-            <Link
-              href="/inventory"
-              className="block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
-            >
-              Inventory
-            </Link>
-
-            <Link
-              href="/stock-movement"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              Stock Movement
-            </Link>
-
-            <Link
-              href="/locations"
-              className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              Locations
-            </Link>
-
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Users
-            </div>
-
-          </nav>
-        </aside>
-
-        {/* MAIN */}
-        <main className="min-w-0 flex-1 p-6 md:p-10">
-          <div className="mx-auto w-full max-w-[1500px]">
-
-            {/* HEADER */}
             <header className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
@@ -213,13 +172,11 @@ export default async function InventoryPage({
               </p>
             </header>
 
-            {/* SEARCH */}
-            <section className="mb-6 w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-
+            <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <form
                 action="/inventory"
                 method="GET"
-                className="flex w-full flex-col gap-3 lg:flex-row"
+                className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
               >
                 <input
                   name="q"
@@ -244,14 +201,11 @@ export default async function InventoryPage({
                   </Link>
                 )}
               </form>
-
             </section>
 
-            {/* INVENTORY LIST */}
-            <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <section className="w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
-
                 <div>
                   <h2 className="text-lg font-semibold">
                     Inventory List
@@ -265,12 +219,9 @@ export default async function InventoryPage({
                 <div className="text-sm text-slate-500">
                   Page {currentPage} of {totalPages}
                 </div>
-
               </div>
 
-              {/* HANYA TABEL YANG BOLEH SCROLL HORIZONTAL */}
-              <div className="w-full overflow-x-auto">
-
+              <div className="w-full max-w-full overflow-x-auto">
                 <table className="w-full min-w-[1100px] text-left text-sm">
 
                   <thead className="bg-slate-50 text-slate-500">
@@ -316,8 +267,6 @@ export default async function InventoryPage({
                         key={row.variant_id}
                         className="align-top hover:bg-slate-50"
                       >
-
-                        {/* SKU */}
                         <td className="px-5 py-5">
                           <div className="font-semibold">
                             {row.sku}
@@ -328,7 +277,6 @@ export default async function InventoryPage({
                           </div>
                         </td>
 
-                        {/* PRODUCT */}
                         <td className="px-5 py-5">
                           <div>
                             {row.product_name}
@@ -339,7 +287,6 @@ export default async function InventoryPage({
                           </div>
                         </td>
 
-                        {/* VARIANT */}
                         <td className="px-5 py-5">
                           <div>
                             {row.color ?? "-"}
@@ -350,29 +297,24 @@ export default async function InventoryPage({
                           </div>
                         </td>
 
-                        {/* NORMAL */}
                         <td className="px-5 py-5 text-right">
                           {formatNumber(row.normal_qty)}
                         </td>
 
-                        {/* DEFECT */}
                         <td className="px-5 py-5 text-right">
                           {formatNumber(row.defect_qty)}
                         </td>
 
-                        {/* REJECT */}
                         <td className="px-5 py-5 text-right">
                           {formatNumber(row.reject_qty)}
                         </td>
 
-                        {/* TOTAL */}
                         <td className="px-5 py-5 text-right">
                           <span className="inline-flex rounded-lg bg-slate-100 px-3 py-1 font-bold">
                             {formatNumber(row.total_qty)}
                           </span>
                         </td>
 
-                        {/* LOCATION */}
                         <td className="px-5 py-5">
                           {renderLocation(
                             "NORMAL",
@@ -393,7 +335,6 @@ export default async function InventoryPage({
                               "reject"
                             )}
                         </td>
-
                       </tr>
                     ))}
 
@@ -409,11 +350,9 @@ export default async function InventoryPage({
                     )}
 
                   </tbody>
-
                 </table>
               </div>
 
-              {/* PAGINATION */}
               <div className="flex flex-col gap-4 border-t border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
 
                 <div className="text-sm text-slate-500">
@@ -421,10 +360,11 @@ export default async function InventoryPage({
                 </div>
 
                 <div className="flex gap-2">
-
                   {currentPage > 1 ? (
                     <Link
-                      href={makePageUrl(currentPage - 1)}
+                      href={makePageUrl(
+                        currentPage - 1
+                      )}
                       className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
                     >
                       Previous
@@ -437,7 +377,9 @@ export default async function InventoryPage({
 
                   {currentPage < totalPages ? (
                     <Link
-                      href={makePageUrl(currentPage + 1)}
+                      href={makePageUrl(
+                        currentPage + 1
+                      )}
                       className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
                     >
                       Next
@@ -447,7 +389,6 @@ export default async function InventoryPage({
                       Next
                     </span>
                   )}
-
                 </div>
 
               </div>
@@ -456,7 +397,6 @@ export default async function InventoryPage({
 
           </div>
         </main>
-
       </div>
     </div>
   );

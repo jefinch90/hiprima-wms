@@ -1,13 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import Sidebar from "@/components/Sidebar";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const supabase = await createClient();
 
-  // 1. Cek user login
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -16,11 +15,15 @@ export default async function Home() {
     redirect("/login");
   }
 
-  // 2. Ambil data inventory + area gudang
   const { data: stockAreaData, error: stockAreaError } =
-  await supabase.rpc("get_stock_by_area");
+    await supabase.rpc("get_stock_by_area");
 
-  // 3. Hitung jumlah master data
+  if (stockAreaError) {
+    throw new Error(
+      `Stock area error: ${stockAreaError.message}`
+    );
+  }
+
   const [
     productsResult,
     variantsResult,
@@ -29,38 +32,55 @@ export default async function Home() {
   ] = await Promise.all([
     supabase
       .from("products")
-      .select("id", { count: "exact", head: true }),
+      .select("id", {
+        count: "exact",
+        head: true,
+      }),
 
     supabase
       .from("product_variants")
-      .select("id", { count: "exact", head: true }),
+      .select("id", {
+        count: "exact",
+        head: true,
+      }),
 
     supabase
       .from("warehouses")
-      .select("id", { count: "exact", head: true }),
+      .select("id", {
+        count: "exact",
+        head: true,
+      }),
 
     supabase
       .from("stock_areas")
-      .select("id", { count: "exact", head: true }),
+      .select("id", {
+        count: "exact",
+        head: true,
+      }),
   ]);
 
-  if (stockAreaError) {
-  throw new Error(`Stock area error: ${stockAreaError.message}`);
-}
+  const normalStock = Number(
+    stockAreaData?.find(
+      (row) => row.stock_area === "NORMAL"
+    )?.total_qty ?? 0
+  );
 
-const normalStock = Number(
-  stockAreaData?.find((row) => row.stock_area === "NORMAL")?.total_qty ?? 0
-);
+  const defectStock = Number(
+    stockAreaData?.find(
+      (row) => row.stock_area === "DEFECT"
+    )?.total_qty ?? 0
+  );
 
-const defectStock = Number(
-  stockAreaData?.find((row) => row.stock_area === "DEFECT")?.total_qty ?? 0
-);
+  const rejectStock = Number(
+    stockAreaData?.find(
+      (row) => row.stock_area === "REJECT"
+    )?.total_qty ?? 0
+  );
 
-const rejectStock = Number(
-  stockAreaData?.find((row) => row.stock_area === "REJECT")?.total_qty ?? 0
-);
-
-const totalStock = normalStock + defectStock + rejectStock;
+  const totalStock =
+    normalStock +
+    defectStock +
+    rejectStock;
 
   const formatNumber = (value: number) =>
     value.toLocaleString("id-ID");
@@ -91,26 +111,35 @@ const totalStock = normalStock + defectStock + rejectStock;
   const summary = [
     {
       label: "Products",
-      value: formatNumber(productsResult.count ?? 0),
+      value: formatNumber(
+        productsResult.count ?? 0
+      ),
     },
     {
       label: "SKU / Variants",
-      value: formatNumber(variantsResult.count ?? 0),
+      value: formatNumber(
+        variantsResult.count ?? 0
+      ),
     },
     {
       label: "Warehouse",
-      value: formatNumber(warehousesResult.count ?? 0),
+      value: formatNumber(
+        warehousesResult.count ?? 0
+      ),
     },
     {
       label: "Stock Areas",
-      value: formatNumber(stockAreasResult.count ?? 0),
+      value: formatNumber(
+        stockAreasResult.count ?? 0
+      ),
     },
   ];
 
   const stockAreaRows = [
     {
       area: "NORMAL",
-      description: "Area Stok Normal / Siap Jual",
+      description:
+        "Area Stok Normal / Siap Jual",
       quantity: normalStock,
     },
     {
@@ -126,60 +155,13 @@ const totalStock = normalStock + defectStock + rejectStock;
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="flex min-h-screen">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
+      <div className="flex min-h-screen w-full max-w-full">
 
-        {/* SIDEBAR */}
-        <aside className="hidden w-64 border-r border-slate-200 bg-white p-6 lg:block">
-          <div className="mb-10">
-            <div className="text-xl font-bold tracking-tight">
-              Hi.PRIMA
-            </div>
+        <Sidebar />
 
-            <div className="text-sm text-slate-500">
-              Warehouse Management System
-            </div>
-          </div>
-
-          <nav className="space-y-2">
-            <div className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">
-              Dashboard
-            </div>
-
-            <Link
-  href="/products"
-  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
->
-  Products
-</Link>
-
-            <Link
-  href="/inventory"
-  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
->
-  Inventory
-</Link>
-
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Stock Movement
-            </div>
-
-            <Link
-  href="/locations"
-  className="block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
->
-  Locations
-</Link>
-
-            <div className="rounded-xl px-4 py-3 text-sm text-slate-600">
-              Users
-            </div>
-          </nav>
-        </aside>
-
-        {/* MAIN */}
-        <main className="flex-1 p-6 md:p-10">
-          <div className="mx-auto max-w-7xl">
+        <main className="min-w-0 max-w-full flex-1 p-6 md:p-10">
+          <div className="mx-auto w-full min-w-0 max-w-7xl">
 
             <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
@@ -201,7 +183,6 @@ const totalStock = normalStock + defectStock + rejectStock;
               </div>
             </header>
 
-            {/* STOCK CARDS */}
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {stats.map((item) => (
                 <div
@@ -223,7 +204,6 @@ const totalStock = normalStock + defectStock + rejectStock;
               ))}
             </section>
 
-            {/* SUMMARY */}
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-6">
                 <h2 className="text-lg font-semibold">
@@ -253,8 +233,7 @@ const totalStock = normalStock + defectStock + rejectStock;
               </div>
             </section>
 
-            {/* STOCK AREA */}
-            <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <section className="mt-6 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 p-6">
                 <h2 className="text-lg font-semibold">
                   Stock by Area
@@ -265,7 +244,7 @@ const totalStock = normalStock + defectStock + rejectStock;
                 </p>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="w-full max-w-full overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
@@ -295,7 +274,9 @@ const totalStock = normalStock + defectStock + rejectStock;
                         </td>
 
                         <td className="px-6 py-4 text-right font-semibold">
-                          {formatNumber(item.quantity)}
+                          {formatNumber(
+                            item.quantity
+                          )}
                         </td>
                       </tr>
                     ))}
