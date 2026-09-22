@@ -62,8 +62,7 @@ export default async function StockMovementPage({
   const params = await searchParams;
 
   const search = params.q?.trim() ?? "";
-  const typeFilter =
-    params.type?.trim() ?? "";
+  const typeFilter = params.type?.trim() ?? "";
 
   const currentPage = Math.max(
     Number(params.page ?? "1") || 1,
@@ -89,8 +88,7 @@ export default async function StockMovementPage({
     );
   }
 
-  const movements =
-    (data ?? []) as MovementRow[];
+  const movements = (data ?? []) as MovementRow[];
 
   const totalCount = Number(
     movements[0]?.total_count ?? 0
@@ -102,26 +100,20 @@ export default async function StockMovementPage({
   );
 
   const formatNumber = (value: number) =>
-    Number(value ?? 0).toLocaleString(
-      "id-ID"
-    );
+    Number(value ?? 0).toLocaleString("id-ID");
 
   const formatDate = (value: string) =>
-    new Date(value).toLocaleString(
-      "id-ID",
-      {
-        timeZone: "Asia/Jakarta",
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    );
+    new Date(value).toLocaleString("id-ID", {
+      timeZone: "Asia/Jakarta",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
   const makePageUrl = (page: number) => {
-    const query =
-      new URLSearchParams();
+    const query = new URLSearchParams();
 
     if (search) {
       query.set("q", search);
@@ -131,57 +123,70 @@ export default async function StockMovementPage({
       query.set("type", typeFilter);
     }
 
-    query.set(
-      "page",
-      String(page)
-    );
+    query.set("page", String(page));
 
     return `/stock-movement?${query.toString()}`;
   };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
-
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-slate-50 text-slate-900">
       <div className="flex min-h-screen w-full max-w-full">
 
         <Sidebar />
 
         <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+          <div className="mx-auto w-full min-w-0 max-w-[1400px]">
 
-          <div className="mx-auto w-full min-w-0 max-w-[1600px]">
-
+            {/* HEADER */}
             <header className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
-              <h1 className="mt-1 text-3xl font-bold">
-                Stock Movement
-              </h1>
+              <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
 
-              <p className="mt-2 text-sm text-slate-500">
-                Riwayat pergerakan stok Warehouse Management System
-              </p>
+                <div className="min-w-0">
+                  <h1 className="text-3xl font-bold">
+                    Stock Movement
+                  </h1>
+
+                  <p className="mt-2 text-sm text-slate-500">
+                    Riwayat pergerakan stok Warehouse Management System
+                  </p>
+                </div>
+
+                <Link
+                  href="/stock-movement/transfer"
+                  className="shrink-0 rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  Transfer Stock
+                </Link>
+
+              </div>
             </header>
 
+
+            {/* SEARCH */}
             <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
               <form
                 action="/stock-movement"
                 method="GET"
-                className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
+                className="grid w-full min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto_auto]"
               >
+
                 <input
+                  type="text"
                   name="q"
                   defaultValue={search}
                   placeholder="Cari SKU, produk, reference, lokasi..."
-                  className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                  className="min-w-0 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                 />
 
                 <select
                   name="type"
                   defaultValue={typeFilter}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                  className="min-w-0 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
                 >
                   <option value="">
                     All Movement
@@ -235,15 +240,18 @@ export default async function StockMovementPage({
                     Reset
                   </Link>
                 )}
+
               </form>
 
             </section>
 
-            <section className="w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+            {/* MOVEMENT LIST */}
+            <section className="w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
 
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-lg font-semibold">
                     Movement History
                   </h2>
@@ -259,45 +267,59 @@ export default async function StockMovementPage({
 
               </div>
 
-              <div className="w-full max-w-full overflow-x-auto">
 
-                <table className="w-full min-w-[1250px] text-left text-sm">
+              {/* DESKTOP TABLE */}
+              <div className="hidden w-full max-w-full lg:block">
+
+                <table className="w-full table-fixed text-left text-sm">
+
+                  <colgroup>
+                    <col className="w-[6%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[6%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                  </colgroup>
 
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         No
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Date
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Type
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         SKU
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Product
                       </th>
 
-                      <th className="px-4 py-4 text-right">
+                      <th className="px-3 py-4 text-right">
                         Qty
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Movement
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Reference
                       </th>
 
-                      <th className="px-4 py-4">
+                      <th className="px-3 py-4">
                         Notes
                       </th>
                     </tr>
@@ -307,23 +329,22 @@ export default async function StockMovementPage({
 
                     {movements.map((movement) => (
                       <tr
-                        key={
-                          movement.movement_id
-                        }
-                        className="hover:bg-slate-50"
+                        key={movement.movement_id}
+                        className="align-top hover:bg-slate-50"
                       >
-                        <td className="px-4 py-4 font-semibold">
+
+                        <td className="break-words px-3 py-5 font-semibold">
                           #{movement.movement_no}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4">
+                        <td className="break-words px-3 py-5">
                           {formatDate(
                             movement.created_at
                           )}
                         </td>
 
-                        <td className="px-4 py-4">
-                          <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium">
+                        <td className="break-words px-3 py-5">
+                          <span className="inline-flex max-w-full rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium">
                             {movementLabels[
                               movement.movement_type
                             ] ??
@@ -331,39 +352,39 @@ export default async function StockMovementPage({
                           </span>
                         </td>
 
-                        <td className="px-4 py-4 font-semibold">
+                        <td className="break-all px-3 py-5 font-semibold">
                           {movement.sku}
                         </td>
 
-                        <td className="px-4 py-4">
+                        <td className="break-words px-3 py-5">
                           <div>
                             {movement.product_name}
                           </div>
 
-                          <div className="text-xs text-slate-400">
+                          <div className="mt-1 text-xs text-slate-400">
                             {movement.product_code}
                           </div>
                         </td>
 
-                        <td className="px-4 py-4 text-right font-bold">
+                        <td className="px-3 py-5 text-right font-bold">
                           {formatNumber(
                             movement.quantity
                           )}
                         </td>
 
-                        <td className="px-4 py-4">
-                          <div className="whitespace-nowrap">
-                            {movement.from_location ??
-                              "-"}
-                            {" → "}
-                            {movement.to_location ??
-                              "-"}
-                          </div>
+                        <td className="break-words px-3 py-5">
+                          {movement.from_location ??
+                            "-"}
+                          {" → "}
+                          {movement.to_location ??
+                            "-"}
                         </td>
 
-                        <td className="px-4 py-4">
-                          {movement.reference_no ??
-                            "-"}
+                        <td className="break-words px-3 py-5">
+                          <div>
+                            {movement.reference_no ??
+                              "-"}
+                          </div>
 
                           {movement.reason && (
                             <div className="mt-1 text-xs text-slate-400">
@@ -372,9 +393,10 @@ export default async function StockMovementPage({
                           )}
                         </td>
 
-                        <td className="max-w-[250px] px-4 py-4 text-slate-500">
+                        <td className="break-words px-3 py-5 text-slate-500">
                           {movement.notes ?? "-"}
                         </td>
+
                       </tr>
                     ))}
 
@@ -382,7 +404,7 @@ export default async function StockMovementPage({
                       <tr>
                         <td
                           colSpan={9}
-                          className="px-4 py-12 text-center text-slate-500"
+                          className="px-5 py-12 text-center text-slate-500"
                         >
                           Tidak ada stock movement ditemukan.
                         </td>
@@ -390,17 +412,136 @@ export default async function StockMovementPage({
                     )}
 
                   </tbody>
+
                 </table>
 
               </div>
 
+
+              {/* TABLET / MOBILE */}
+              <div className="divide-y divide-slate-100 lg:hidden">
+
+                {movements.map((movement) => (
+                  <div
+                    key={movement.movement_id}
+                    className="p-5"
+                  >
+
+                    <div className="flex items-start justify-between gap-4">
+
+                      <div className="min-w-0">
+                        <div className="font-semibold">
+                          #{movement.movement_no}
+                        </div>
+
+                        <div className="mt-1 break-all font-semibold">
+                          {movement.sku}
+                        </div>
+                      </div>
+
+                      <span className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium">
+                        {movementLabels[
+                          movement.movement_type
+                        ] ??
+                          movement.movement_type}
+                      </span>
+
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+
+                      <div>
+                        <div className="text-xs text-slate-400">
+                          Date
+                        </div>
+
+                        <div className="mt-1">
+                          {formatDate(
+                            movement.created_at
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs text-slate-400">
+                          Qty
+                        </div>
+
+                        <div className="mt-1 font-semibold">
+                          {formatNumber(
+                            movement.quantity
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="col-span-2">
+                        <div className="text-xs text-slate-400">
+                          Product
+                        </div>
+
+                        <div className="mt-1 break-words">
+                          {movement.product_name}
+                        </div>
+                      </div>
+
+                      <div className="col-span-2">
+                        <div className="text-xs text-slate-400">
+                          Movement
+                        </div>
+
+                        <div className="mt-1 break-words">
+                          {movement.from_location ??
+                            "-"}
+                          {" → "}
+                          {movement.to_location ??
+                            "-"}
+                        </div>
+                      </div>
+
+                      <div className="col-span-2">
+                        <div className="text-xs text-slate-400">
+                          Reference
+                        </div>
+
+                        <div className="mt-1 break-words">
+                          {movement.reference_no ??
+                            "-"}
+                        </div>
+                      </div>
+
+                      <div className="col-span-2">
+                        <div className="text-xs text-slate-400">
+                          Notes
+                        </div>
+
+                        <div className="mt-1 break-words text-slate-500">
+                          {movement.notes ?? "-"}
+                        </div>
+                      </div>
+
+                    </div>
+
+                  </div>
+                ))}
+
+                {movements.length === 0 && (
+                  <div className="p-8 text-center text-sm text-slate-500">
+                    Tidak ada stock movement ditemukan.
+                  </div>
+                )}
+
+              </div>
+
+
+              {/* PAGINATION */}
               <div className="flex flex-col gap-4 border-t border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
 
                 <div className="text-sm text-slate-500">
                   Menampilkan maksimal {pageSize} movement per halaman
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
+
                   {currentPage > 1 ? (
                     <Link
                       href={makePageUrl(
@@ -430,6 +571,7 @@ export default async function StockMovementPage({
                       Next
                     </span>
                   )}
+
                 </div>
 
               </div>
@@ -438,6 +580,7 @@ export default async function StockMovementPage({
 
           </div>
         </main>
+
       </div>
     </div>
   );
