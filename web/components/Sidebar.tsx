@@ -24,6 +24,10 @@ const menuItems = [
     label: "Locations",
     href: "/locations",
   },
+  {
+    label: "Users",
+    href: "/users",
+  },
 ];
 
 export default function Sidebar() {
@@ -67,11 +71,6 @@ export default function Sidebar() {
             </Link>
           );
         })}
-
-        {/* USERS - BELUM DIAKTIFKAN */}
-        <div className="rounded-xl px-4 py-3 text-sm text-slate-400">
-          Users
-        </div>
       </nav>
     </aside>
   );
