@@ -1,10 +1,15 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
-import Sidebar from "@/components/Sidebar";
-import { transferStockAction } from "./actions";
+"use client";
 
-export const dynamic = "force-dynamic";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import Sidebar from "@/components/Sidebar";
+import { createClient } from "@/utils/supabase/client";
 
 type SearchSkuRow = {
   variant_id: string;
@@ -17,16 +22,7 @@ type SearchSkuRow = {
   total_qty: number;
 };
 
-type VariantRow = {
-  variant_id: string;
-  sku: string;
-  product_code: string;
-  product_name: string;
-  brand: string | null;
-  color: string | null;
-  size: string | null;
-  total_qty: number;
-};
+type VariantRow = SearchSkuRow;
 
 type SourceLocationRow = {
   location_id: string;
@@ -46,51 +42,95 @@ type DestinationLocationRow = {
   current_qty: number;
 };
 
-export default async function TransferStockPage({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    q?: string;
-    variant?: string;
-    from?: string;
-    success?: string;
-    error?: string;
-    sku?: string;
-    movement?: string;
-    source?: string;
-    destination?: string;
-  }>;
-}) {
-  const supabase = await createClient();
+type TransferResult = {
+  new_movement_no: number | string;
+  source_qty_after: number | string;
+  destination_qty_after: number | string;
+};
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export default function TransferStockPage() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
 
-  if (!user) {
-    redirect("/login");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchSkuRow[]>([]);
+
+  const [selectedVariant, setSelectedVariant] =
+    useState<VariantRow | null>(null);
+
+  const [sourceLocations, setSourceLocations] =
+    useState<SourceLocationRow[]>([]);
+
+  const [selectedSource, setSelectedSource] =
+    useState<SourceLocationRow | null>(null);
+
+  const [destinationLocations, setDestinationLocations] =
+    useState<DestinationLocationRow[]>([]);
+
+  const [destinationId, setDestinationId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [referenceNo, setReferenceNo] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const [searching, setSearching] = useState(false);
+  const [loadingVariant, setLoadingVariant] = useState(false);
+  const [loadingDestination, setLoadingDestination] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successResult, setSuccessResult] =
+    useState<TransferResult | null>(null);
+
+  useEffect(() => {
+    async function checkAuth() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+      }
+    }
+
+    checkAuth();
+  }, [router, supabase]);
+
+  const formatNumber = (
+    value: number | string | null | undefined
+  ) => Number(value ?? 0).toLocaleString("id-ID");
+
+  function resetTransfer() {
+    setSearchInput("");
+    setSearchResults([]);
+    setSelectedVariant(null);
+    setSourceLocations([]);
+    setSelectedSource(null);
+    setDestinationLocations([]);
+    setDestinationId("");
+    setQuantity("");
+    setReferenceNo("");
+    setNotes("");
+    setErrorMessage("");
+    setSuccessResult(null);
   }
 
-  const params = await searchParams;
+  async function handleSearch(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
 
-  const search = params.q?.trim() ?? "";
-  const variantId = params.variant ?? "";
-  const fromLocationId = params.from ?? "";
+    const search = searchInput.trim();
 
-  const success = params.success === "1";
-  const errorMessage = params.error ?? "";
+    setErrorMessage("");
+    setSuccessResult(null);
 
-  const successSku = params.sku ?? "";
-  const successMovement = params.movement ?? "";
-  const successSource = params.source ?? "";
-  const successDestination = params.destination ?? "";
+    if (!search) {
+      setSearchResults([]);
+      return;
+    }
 
-  let searchResults: SearchSkuRow[] = [];
-  let selectedVariant: VariantRow | null = null;
-  let sourceLocations: SourceLocationRow[] = [];
-  let destinationLocations: DestinationLocationRow[] = [];
+    setSearching(true);
 
-  if (search && !success) {
     const { data, error } = await supabase.rpc(
       "search_transfer_skus",
       {
@@ -100,118 +140,186 @@ export default async function TransferStockPage({
     );
 
     if (error) {
-      throw new Error(
-        `Search transfer SKU error: ${error.message}`
-      );
+      setErrorMessage(error.message);
+      setSearchResults([]);
+      setSearching(false);
+      return;
     }
 
-    searchResults = (data ?? []) as SearchSkuRow[];
+    setSearchResults((data ?? []) as SearchSkuRow[]);
+    setSearching(false);
   }
 
-  if (variantId && !success) {
-    const { data, error } = await supabase.rpc(
-      "get_transfer_variant",
-      {
+  async function handleSelectVariant(
+    variantId: string
+  ) {
+    setLoadingVariant(true);
+    setErrorMessage("");
+    setSuccessResult(null);
+
+    setSelectedSource(null);
+    setDestinationLocations([]);
+    setDestinationId("");
+    setQuantity("");
+
+    const { data: variantData, error: variantError } =
+      await supabase.rpc("get_transfer_variant", {
         p_variant_id: variantId,
+      });
+
+    if (variantError) {
+      setErrorMessage(variantError.message);
+      setLoadingVariant(false);
+      return;
+    }
+
+    const variant =
+      ((variantData ?? [])[0] as VariantRow | undefined) ??
+      null;
+
+    if (!variant) {
+      setErrorMessage("SKU tidak ditemukan.");
+      setLoadingVariant(false);
+      return;
+    }
+
+    const { data: sourceData, error: sourceError } =
+      await supabase.rpc(
+        "get_transfer_source_locations",
+        {
+          p_variant_id: variantId,
+        }
+      );
+
+    if (sourceError) {
+      setErrorMessage(sourceError.message);
+      setLoadingVariant(false);
+      return;
+    }
+
+    setSelectedVariant(variant);
+    setSourceLocations(
+      (sourceData ?? []) as SourceLocationRow[]
+    );
+
+    setLoadingVariant(false);
+  }
+
+  async function handleSelectSource(
+    source: SourceLocationRow
+  ) {
+    if (!selectedVariant) {
+      return;
+    }
+
+    setSelectedSource(source);
+    setDestinationId("");
+    setDestinationLocations([]);
+    setErrorMessage("");
+    setLoadingDestination(true);
+
+    const { data, error } = await supabase.rpc(
+      "get_transfer_destination_locations",
+      {
+        p_variant_id: selectedVariant.variant_id,
+        p_from_location_id: source.location_id,
       }
     );
 
     if (error) {
-      throw new Error(
-        `Transfer variant error: ${error.message}`
-      );
+      setErrorMessage(error.message);
+      setLoadingDestination(false);
+      return;
     }
 
-    selectedVariant =
-      ((data ?? [])[0] as VariantRow | undefined) ?? null;
-
-    if (!selectedVariant) {
-      redirect(
-        `/stock-movement/transfer?error=${encodeURIComponent(
-          "SKU tidak ditemukan."
-        )}`
-      );
-    }
-
-    const {
-      data: sourceData,
-      error: sourceError,
-    } = await supabase.rpc(
-      "get_transfer_source_locations",
-      {
-        p_variant_id: variantId,
-      }
+    setDestinationLocations(
+      (data ?? []) as DestinationLocationRow[]
     );
 
-    if (sourceError) {
-      throw new Error(
-        `Transfer source location error: ${sourceError.message}`
-      );
-    }
-
-    sourceLocations =
-      (sourceData ?? []) as SourceLocationRow[];
+    setLoadingDestination(false);
   }
 
-  if (
-    variantId &&
-    fromLocationId &&
-    selectedVariant &&
-    !success
+  async function handleTransfer(
+    event: FormEvent<HTMLFormElement>
   ) {
-    const {
-      data: destinationData,
-      error: destinationError,
-    } = await supabase.rpc(
-      "get_transfer_destination_locations",
+    event.preventDefault();
+
+    setErrorMessage("");
+    setSuccessResult(null);
+
+    if (!selectedVariant || !selectedSource) {
+      setErrorMessage(
+        "SKU dan lokasi asal wajib dipilih."
+      );
+      return;
+    }
+
+    if (!destinationId) {
+      setErrorMessage(
+        "Lokasi tujuan wajib dipilih."
+      );
+      return;
+    }
+
+    const transferQty = Number(quantity);
+
+    if (
+      !Number.isInteger(transferQty) ||
+      transferQty <= 0
+    ) {
+      setErrorMessage(
+        "Quantity harus berupa angka lebih dari 0."
+      );
+      return;
+    }
+
+    if (
+      transferQty >
+      Number(selectedSource.qty_on_hand)
+    ) {
+      setErrorMessage(
+        "Quantity melebihi stok tersedia."
+      );
+      return;
+    }
+
+    setTransferring(true);
+
+    const { data, error } = await supabase.rpc(
+      "transfer_stock",
       {
-        p_variant_id: variantId,
-        p_from_location_id: fromLocationId,
+        p_variant_id: selectedVariant.variant_id,
+        p_from_location_id:
+          selectedSource.location_id,
+        p_to_location_id: destinationId,
+        p_quantity: transferQty,
+        p_reference_no:
+          referenceNo.trim() || null,
+        p_notes: notes.trim() || null,
       }
     );
 
-    if (destinationError) {
-      throw new Error(
-        `Transfer destination location error: ${destinationError.message}`
+    if (error) {
+      setErrorMessage(error.message);
+      setTransferring(false);
+      return;
+    }
+
+    const result =
+      ((data ?? [])[0] as TransferResult | undefined) ??
+      null;
+
+    if (!result) {
+      setErrorMessage(
+        "Transfer berhasil diproses tetapi hasil transaksi tidak ditemukan."
       );
+      setTransferring(false);
+      return;
     }
 
-    destinationLocations =
-      (destinationData ?? []) as DestinationLocationRow[];
+    setSuccessResult(result);
+    setTransferring(false);
   }
-
-  const selectedSource =
-    sourceLocations.find(
-      (location) =>
-        location.location_id === fromLocationId
-    ) ?? null;
-
-  const formatNumber = (
-    value: number | string | null | undefined
-  ) =>
-    Number(value ?? 0).toLocaleString("id-ID");
-
-  const makeVariantUrl = (item: SearchSkuRow) => {
-    const query = new URLSearchParams();
-
-    query.set("q", search);
-    query.set("variant", item.variant_id);
-
-    return `/stock-movement/transfer?${query.toString()}`;
-  };
-
-  const makeSourceUrl = (locationId: string) => {
-    const query = new URLSearchParams();
-
-    if (search) {
-      query.set("q", search);
-    }
-
-    query.set("variant", variantId);
-    query.set("from", locationId);
-
-    return `/stock-movement/transfer?${query.toString()}`;
-  };
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
@@ -222,14 +330,13 @@ export default async function TransferStockPage({
         <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1400px]">
 
-            {/* HEADER */}
             <header className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
               <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div className="min-w-0">
+                <div>
                   <h1 className="text-3xl font-bold">
                     Transfer Stock
                   </h1>
@@ -248,8 +355,7 @@ export default async function TransferStockPage({
               </div>
             </header>
 
-            {/* SUCCESS */}
-            {success && (
+            {successResult && selectedVariant && (
               <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
                 <div className="text-lg font-semibold text-emerald-900">
                   Transfer stock berhasil
@@ -264,8 +370,9 @@ export default async function TransferStockPage({
                     <div className="text-xs text-slate-500">
                       SKU
                     </div>
+
                     <div className="mt-1 break-all font-semibold">
-                      {successSku || "-"}
+                      {selectedVariant.sku}
                     </div>
                   </div>
 
@@ -273,10 +380,9 @@ export default async function TransferStockPage({
                     <div className="text-xs text-slate-500">
                       Movement No
                     </div>
+
                     <div className="mt-1 font-semibold">
-                      {successMovement
-                        ? `#${successMovement}`
-                        : "-"}
+                      #{successResult.new_movement_no}
                     </div>
                   </div>
 
@@ -284,10 +390,11 @@ export default async function TransferStockPage({
                     <div className="text-xs text-slate-500">
                       Source Stock After
                     </div>
+
                     <div className="mt-1 font-semibold">
-                      {successSource
-                        ? formatNumber(successSource)
-                        : "-"}
+                      {formatNumber(
+                        successResult.source_qty_after
+                      )}
                     </div>
                   </div>
 
@@ -295,32 +402,26 @@ export default async function TransferStockPage({
                     <div className="text-xs text-slate-500">
                       Destination Stock After
                     </div>
+
                     <div className="mt-1 font-semibold">
-                      {successDestination
-                        ? formatNumber(
-                            successDestination
-                          )
-                        : "-"}
+                      {formatNumber(
+                        successResult.destination_qty_after
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                  <Link
-                    href="/stock-movement/transfer"
-                    className="rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white"
+                  <button
+                    type="button"
+                    onClick={resetTransfer}
+                    className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white"
                   >
                     Transfer Lagi
-                  </Link>
+                  </button>
 
                   <Link
-                    href={
-                      successSku
-                        ? `/stock-movement?q=${encodeURIComponent(
-                            successSku
-                          )}`
-                        : "/stock-movement"
-                    }
+                    href="/stock-movement"
                     className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
                   >
                     Lihat Movement
@@ -329,8 +430,7 @@ export default async function TransferStockPage({
               </section>
             )}
 
-            {/* ERROR */}
-            {errorMessage && !success && (
+            {errorMessage && (
               <section className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
                 <div className="font-semibold text-red-800">
                   Transfer gagal
@@ -342,9 +442,8 @@ export default async function TransferStockPage({
               </section>
             )}
 
-            {!success && (
+            {!successResult && (
               <>
-                {/* STEP 1 */}
                 <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="mb-5">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -361,38 +460,41 @@ export default async function TransferStockPage({
                   </div>
 
                   <form
-                    action="/stock-movement/transfer"
-                    method="GET"
+                    onSubmit={handleSearch}
                     className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
                   >
                     <input
-                      type="text"
-                      name="q"
-                      defaultValue={search}
+                      value={searchInput}
+                      onChange={(event) =>
+                        setSearchInput(event.target.value)
+                      }
                       placeholder="Contoh: T290Butter"
                       className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                     />
 
                     <button
                       type="submit"
-                      className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
+                      disabled={searching}
+                      className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white disabled:opacity-50"
                     >
-                      Search SKU
+                      {searching
+                        ? "Searching..."
+                        : "Search SKU"}
                     </button>
 
-                    {(search ||
-                      variantId ||
-                      fromLocationId) && (
-                      <Link
-                        href="/stock-movement/transfer"
+                    {(searchInput ||
+                      selectedVariant) && (
+                      <button
+                        type="button"
+                        onClick={resetTransfer}
                         className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-center text-sm"
                       >
                         Reset
-                      </Link>
+                      </button>
                     )}
                   </form>
 
-                  {search && (
+                  {searchResults.length > 0 && (
                     <div className="mt-6">
                       <div className="mb-3 text-sm text-slate-500">
                         {formatNumber(
@@ -401,77 +503,77 @@ export default async function TransferStockPage({
                         SKU ditemukan
                       </div>
 
-                      {searchResults.length > 0 ? (
-                        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
-                          {searchResults.map((item) => {
-                            const active =
-                              item.variant_id ===
-                              variantId;
+                      <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+                        {searchResults.map((item) => {
+                          const active =
+                            selectedVariant?.variant_id ===
+                            item.variant_id;
 
-                            return (
-                              <div
-                                key={item.variant_id}
-                                className={
-                                  active
-                                    ? "flex flex-col gap-4 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
-                                    : "flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"
-                                }
-                              >
-                                <div className="min-w-0">
-                                  <div className="break-all font-semibold">
-                                    {item.sku}
-                                  </div>
-
-                                  <div className="mt-1 break-words text-sm">
-                                    {item.product_name}
-                                  </div>
-
-                                  <div className="mt-1 text-xs text-slate-500">
-                                    {item.product_code}
-                                    {" • "}
-                                    {item.color ?? "-"}
-                                    {" • "}
-                                    Size {item.size ?? "-"}
-                                  </div>
-
-                                  <div className="mt-2 text-xs text-slate-500">
-                                    Total stock:{" "}
-                                    <span className="font-semibold text-slate-900">
-                                      {formatNumber(
-                                        item.total_qty
-                                      )}
-                                    </span>
-                                  </div>
+                          return (
+                            <div
+                              key={item.variant_id}
+                              className={
+                                active
+                                  ? "flex flex-col gap-4 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                                  : "flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"
+                              }
+                            >
+                              <div className="min-w-0">
+                                <div className="break-all font-semibold">
+                                  {item.sku}
                                 </div>
 
-                                {active ? (
-                                  <span className="shrink-0 rounded-xl bg-slate-200 px-4 py-2 text-center text-sm font-medium">
-                                    Selected
-                                  </span>
-                                ) : (
-                                  <Link
-                                    href={makeVariantUrl(
-                                      item
+                                <div className="mt-1 break-words text-sm">
+                                  {item.product_name}
+                                </div>
+
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {item.product_code}
+                                  {" • "}
+                                  {item.color ?? "-"}
+                                  {" • "}
+                                  Size {item.size ?? "-"}
+                                </div>
+
+                                <div className="mt-2 text-xs text-slate-500">
+                                  Total stock:{" "}
+                                  <span className="font-semibold text-slate-900">
+                                    {formatNumber(
+                                      item.total_qty
                                     )}
-                                    className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2 text-center text-sm font-medium hover:bg-slate-50"
-                                  >
-                                    Pilih SKU
-                                  </Link>
-                                )}
+                                  </span>
+                                </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                          SKU tidak ditemukan.
-                        </div>
-                      )}
+
+                              <button
+                                type="button"
+                                disabled={
+                                  active ||
+                                  loadingVariant
+                                }
+                                onClick={() =>
+                                  handleSelectVariant(
+                                    item.variant_id
+                                  )
+                                }
+                                className={
+                                  active
+                                    ? "shrink-0 rounded-xl bg-slate-200 px-4 py-2 text-sm font-medium"
+                                    : "shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                                }
+                              >
+                                {active
+                                  ? "Selected"
+                                  : "Pilih SKU"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </section>
 
-                {/* SELECTED SKU + SOURCE */}
                 {selectedVariant && (
                   <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="mb-5">
@@ -479,39 +581,12 @@ export default async function TransferStockPage({
                         SKU Terpilih
                       </div>
 
-                      <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <div className="break-all text-xl font-bold">
-                            {selectedVariant.sku}
-                          </div>
+                      <div className="mt-2 text-xl font-bold">
+                        {selectedVariant.sku}
+                      </div>
 
-                          <div className="mt-1 break-words text-sm">
-                            {selectedVariant.product_name}
-                          </div>
-
-                          <div className="mt-1 text-sm text-slate-500">
-                            {selectedVariant.product_code}
-                            {" • "}
-                            {selectedVariant.brand ?? "-"}
-                            {" • "}
-                            {selectedVariant.color ?? "-"}
-                            {" • "}
-                            Size{" "}
-                            {selectedVariant.size ?? "-"}
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 rounded-xl bg-slate-50 px-4 py-3">
-                          <div className="text-xs text-slate-500">
-                            Total Stock
-                          </div>
-
-                          <div className="mt-1 text-xl font-bold">
-                            {formatNumber(
-                              selectedVariant.total_qty
-                            )}
-                          </div>
-                        </div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {selectedVariant.product_name}
                       </div>
                     </div>
 
@@ -524,73 +599,63 @@ export default async function TransferStockPage({
                         Pilih Source Rack
                       </h2>
 
-                      <p className="mt-1 text-sm text-slate-500">
-                        Hanya lokasi yang memiliki stok yang dapat dipilih.
-                      </p>
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {sourceLocations.map(
+                          (location) => {
+                            const active =
+                              selectedSource?.location_id ===
+                              location.location_id;
 
-                      {sourceLocations.length > 0 ? (
-                        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {sourceLocations.map(
-                            (location) => {
-                              const active =
-                                location.location_id ===
-                                fromLocationId;
-
-                              return (
-                                <Link
-                                  key={
-                                    location.location_id
-                                  }
-                                  href={makeSourceUrl(
-                                    location.location_id
-                                  )}
-                                  className={
-                                    active
-                                      ? "rounded-xl border-2 border-slate-900 bg-slate-50 p-4"
-                                      : "rounded-xl border border-slate-200 p-4 hover:border-slate-400 hover:bg-slate-50"
-                                  }
-                                >
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                      <div className="font-semibold">
-                                        {
-                                          location.location_code
-                                        }
-                                      </div>
-
-                                      <div className="mt-1 text-xs text-slate-500">
-                                        {
-                                          location.location_name
-                                        }
-                                      </div>
+                            return (
+                              <button
+                                key={location.location_id}
+                                type="button"
+                                onClick={() =>
+                                  handleSelectSource(
+                                    location
+                                  )
+                                }
+                                className={
+                                  active
+                                    ? "rounded-xl border-2 border-slate-900 bg-slate-50 p-4 text-left"
+                                    : "rounded-xl border border-slate-200 p-4 text-left hover:border-slate-400 hover:bg-slate-50"
+                                }
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="font-semibold">
+                                      {
+                                        location.location_code
+                                      }
                                     </div>
 
-                                    <div className="shrink-0 rounded-lg bg-slate-100 px-3 py-1 text-sm font-bold">
-                                      {formatNumber(
-                                        location.qty_on_hand
-                                      )}
+                                    <div className="mt-1 text-xs text-slate-500">
+                                      {
+                                        location.location_name
+                                      }
                                     </div>
                                   </div>
 
-                                  <div className="mt-3 text-xs text-slate-500">
-                                    Area:{" "}
-                                    {location.area_code}
+                                  <div className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-bold">
+                                    {formatNumber(
+                                      location.qty_on_hand
+                                    )}
                                   </div>
-                                </Link>
-                              );
-                            }
-                          )}
-                        </div>
-                      ) : (
-                        <div className="mt-5 rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                          SKU ini tidak memiliki stok pada lokasi aktif.
-                        </div>
-                      )}
+                                </div>
+
+                                <div className="mt-3 text-xs text-slate-500">
+                                  Area:{" "}
+                                  {location.area_code}
+                                </div>
+                              </button>
+                            );
+                          }
+                        )}
+                      </div>
                     </div>
                   </section>
                 )}
 
-                {/* STEP 3 */}
                 {selectedVariant &&
                   selectedSource && (
                     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -602,10 +667,6 @@ export default async function TransferStockPage({
                         <h2 className="mt-1 text-lg font-semibold">
                           Detail Transfer
                         </h2>
-
-                        <p className="mt-1 text-sm text-slate-500">
-                          Tentukan lokasi tujuan dan jumlah stok.
-                        </p>
                       </div>
 
                       <div className="mb-6 grid gap-4 sm:grid-cols-2">
@@ -618,14 +679,6 @@ export default async function TransferStockPage({
                             {
                               selectedSource.location_code
                             }
-                          </div>
-
-                          <div className="mt-1 text-xs text-slate-500">
-                            {
-                              selectedSource.location_name
-                            }
-                            {" • "}
-                            {selectedSource.area_code}
                           </div>
                         </div>
 
@@ -643,53 +696,29 @@ export default async function TransferStockPage({
                       </div>
 
                       <form
-                        action={transferStockAction}
+                        onSubmit={handleTransfer}
                         className="space-y-5"
                       >
-                        <input
-                          type="hidden"
-                          name="variant_id"
-                          value={
-                            selectedVariant.variant_id
-                          }
-                        />
-
-                        <input
-                          type="hidden"
-                          name="from_location_id"
-                          value={
-                            selectedSource.location_id
-                          }
-                        />
-
-                        <input
-                          type="hidden"
-                          name="sku"
-                          value={
-                            selectedVariant.sku
-                          }
-                        />
-
                         <div>
-                          <label
-                            htmlFor="to_location_id"
-                            className="mb-2 block text-sm font-medium"
-                          >
+                          <label className="mb-2 block text-sm font-medium">
                             Destination Rack
                           </label>
 
                           <select
-                            id="to_location_id"
-                            name="to_location_id"
                             required
-                            defaultValue=""
-                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
+                            value={destinationId}
+                            onChange={(event) =>
+                              setDestinationId(
+                                event.target.value
+                              )
+                            }
+                            disabled={loadingDestination}
+                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
                           >
-                            <option
-                              value=""
-                              disabled
-                            >
-                              Pilih lokasi tujuan
+                            <option value="">
+                              {loadingDestination
+                                ? "Loading..."
+                                : "Pilih lokasi tujuan"}
                             </option>
 
                             {destinationLocations.map(
@@ -717,27 +746,14 @@ export default async function TransferStockPage({
                               )
                             )}
                           </select>
-
-                          <p className="mt-2 text-xs text-slate-500">
-                            Hanya lokasi aktif dalam area{" "}
-                            <span className="font-medium">
-                              {selectedSource.area_code}
-                            </span>{" "}
-                            yang ditampilkan.
-                          </p>
                         </div>
 
                         <div>
-                          <label
-                            htmlFor="quantity"
-                            className="mb-2 block text-sm font-medium"
-                          >
+                          <label className="mb-2 block text-sm font-medium">
                             Quantity
                           </label>
 
                           <input
-                            id="quantity"
-                            name="quantity"
                             type="number"
                             min="1"
                             max={
@@ -745,73 +761,72 @@ export default async function TransferStockPage({
                             }
                             step="1"
                             required
+                            value={quantity}
+                            onChange={(event) =>
+                              setQuantity(
+                                event.target.value
+                              )
+                            }
                             placeholder="Masukkan qty transfer"
                             className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                           />
-
-                          <p className="mt-2 text-xs text-slate-500">
-                            Maksimal{" "}
-                            {formatNumber(
-                              selectedSource.qty_on_hand
-                            )}{" "}
-                            pcs.
-                          </p>
                         </div>
 
                         <div>
-                          <label
-                            htmlFor="reference_no"
-                            className="mb-2 block text-sm font-medium"
-                          >
-                            Reference
-                            <span className="ml-1 font-normal text-slate-400">
+                          <label className="mb-2 block text-sm font-medium">
+                            Reference{" "}
+                            <span className="font-normal text-slate-400">
                               (optional)
                             </span>
                           </label>
 
                           <input
-                            id="reference_no"
-                            name="reference_no"
-                            type="text"
+                            value={referenceNo}
+                            onChange={(event) =>
+                              setReferenceNo(
+                                event.target.value
+                              )
+                            }
                             placeholder="Contoh: TRF-001"
                             className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                           />
                         </div>
 
                         <div>
-                          <label
-                            htmlFor="notes"
-                            className="mb-2 block text-sm font-medium"
-                          >
-                            Notes
-                            <span className="ml-1 font-normal text-slate-400">
+                          <label className="mb-2 block text-sm font-medium">
+                            Notes{" "}
+                            <span className="font-normal text-slate-400">
                               (optional)
                             </span>
                           </label>
 
                           <textarea
-                            id="notes"
-                            name="notes"
                             rows={4}
+                            value={notes}
+                            onChange={(event) =>
+                              setNotes(
+                                event.target.value
+                              )
+                            }
                             placeholder="Catatan transfer..."
                             className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                           />
                         </div>
 
                         <div className="border-t border-slate-200 pt-5">
-                          {destinationLocations.length >
-                          0 ? (
-                            <button
-                              type="submit"
-                              className="w-full rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white sm:w-auto"
-                            >
-                              Confirm Transfer
-                            </button>
-                          ) : (
-                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                              Tidak ada lokasi tujuan aktif lain di area ini.
-                            </div>
-                          )}
+                          <button
+                            type="submit"
+                            disabled={
+                              transferring ||
+                              destinationLocations.length ===
+                                0
+                            }
+                            className="w-full rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+                          >
+                            {transferring
+                              ? "Processing..."
+                              : "Confirm Transfer"}
+                          </button>
                         </div>
                       </form>
                     </section>

@@ -1,89 +1,161 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import { createClient } from "@/utils/supabase/client";
 
-export const dynamic = "force-dynamic";
+type StockAreaRow = {
+  stock_area: string;
+  total_qty: number | string | null;
+};
 
-export default async function Home() {
-  const supabase = await createClient();
+type DashboardData = {
+  normalStock: number;
+  defectStock: number;
+  rejectStock: number;
+  productsCount: number;
+  variantsCount: number;
+  warehousesCount: number;
+  stockAreasCount: number;
+};
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+const initialDashboardData: DashboardData = {
+  normalStock: 0,
+  defectStock: 0,
+  rejectStock: 0,
+  productsCount: 0,
+  variantsCount: 0,
+  warehousesCount: 0,
+  stockAreasCount: 0,
+};
 
-  if (!user) {
-    redirect("/login");
-  }
+export default function Home() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
 
-  const { data: stockAreaData, error: stockAreaError } =
-    await supabase.rpc("get_stock_by_area");
+  const [dashboardData, setDashboardData] =
+    useState<DashboardData>(initialDashboardData);
 
-  if (stockAreaError) {
-    throw new Error(
-      `Stock area error: ${stockAreaError.message}`
-    );
-  }
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const [
-    productsResult,
-    variantsResult,
-    warehousesResult,
-    stockAreasResult,
-  ] = await Promise.all([
-    supabase
-      .from("products")
-      .select("id", {
-        count: "exact",
-        head: true,
-      }),
+  useEffect(() => {
+    async function loadDashboard() {
+      setLoading(true);
+      setErrorMessage("");
 
-    supabase
-      .from("product_variants")
-      .select("id", {
-        count: "exact",
-        head: true,
-      }),
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-    supabase
-      .from("warehouses")
-      .select("id", {
-        count: "exact",
-        head: true,
-      }),
+      if (userError || !user) {
+        router.replace("/login");
+        return;
+      }
 
-    supabase
-      .from("stock_areas")
-      .select("id", {
-        count: "exact",
-        head: true,
-      }),
-  ]);
+      const { data: stockAreaData, error: stockAreaError } =
+        await supabase.rpc("get_stock_by_area");
 
-  const normalStock = Number(
-    stockAreaData?.find(
-      (row) => row.stock_area === "NORMAL"
-    )?.total_qty ?? 0
-  );
+      if (stockAreaError) {
+        setErrorMessage(
+          `Stock area error: ${stockAreaError.message}`
+        );
+        setLoading(false);
+        return;
+      }
 
-  const defectStock = Number(
-    stockAreaData?.find(
-      (row) => row.stock_area === "DEFECT"
-    )?.total_qty ?? 0
-  );
+      const [
+        productsResult,
+        variantsResult,
+        warehousesResult,
+        stockAreasResult,
+      ] = await Promise.all([
+        supabase
+          .from("products")
+          .select("id", {
+            count: "exact",
+            head: true,
+          }),
 
-  const rejectStock = Number(
-    stockAreaData?.find(
-      (row) => row.stock_area === "REJECT"
-    )?.total_qty ?? 0
-  );
+        supabase
+          .from("product_variants")
+          .select("id", {
+            count: "exact",
+            head: true,
+          }),
 
-  const totalStock =
-    normalStock +
-    defectStock +
-    rejectStock;
+        supabase
+          .from("warehouses")
+          .select("id", {
+            count: "exact",
+            head: true,
+          }),
+
+        supabase
+          .from("stock_areas")
+          .select("id", {
+            count: "exact",
+            head: true,
+          }),
+      ]);
+
+      const queryError =
+        productsResult.error ||
+        variantsResult.error ||
+        warehousesResult.error ||
+        stockAreasResult.error;
+
+      if (queryError) {
+        setErrorMessage(queryError.message);
+        setLoading(false);
+        return;
+      }
+
+      const rows = (stockAreaData ?? []) as StockAreaRow[];
+
+      const normalStock = Number(
+        rows.find(
+          (row) => row.stock_area === "NORMAL"
+        )?.total_qty ?? 0
+      );
+
+      const defectStock = Number(
+        rows.find(
+          (row) => row.stock_area === "DEFECT"
+        )?.total_qty ?? 0
+      );
+
+      const rejectStock = Number(
+        rows.find(
+          (row) => row.stock_area === "REJECT"
+        )?.total_qty ?? 0
+      );
+
+      setDashboardData({
+        normalStock,
+        defectStock,
+        rejectStock,
+        productsCount: productsResult.count ?? 0,
+        variantsCount: variantsResult.count ?? 0,
+        warehousesCount: warehousesResult.count ?? 0,
+        stockAreasCount: stockAreasResult.count ?? 0,
+      });
+
+      setLoading(false);
+    }
+
+    loadDashboard();
+  }, [router, supabase]);
 
   const formatNumber = (value: number) =>
     value.toLocaleString("id-ID");
+
+  const totalStock =
+    dashboardData.normalStock +
+    dashboardData.defectStock +
+    dashboardData.rejectStock;
 
   const stats = [
     {
@@ -93,17 +165,23 @@ export default async function Home() {
     },
     {
       label: "Normal",
-      value: formatNumber(normalStock),
+      value: formatNumber(
+        dashboardData.normalStock
+      ),
       description: "Stok siap jual",
     },
     {
       label: "Defect",
-      value: formatNumber(defectStock),
+      value: formatNumber(
+        dashboardData.defectStock
+      ),
       description: "Stok perlu pengecekan",
     },
     {
       label: "Reject",
-      value: formatNumber(rejectStock),
+      value: formatNumber(
+        dashboardData.rejectStock
+      ),
       description: "Stok reject",
     },
   ];
@@ -112,25 +190,25 @@ export default async function Home() {
     {
       label: "Products",
       value: formatNumber(
-        productsResult.count ?? 0
+        dashboardData.productsCount
       ),
     },
     {
       label: "SKU / Variants",
       value: formatNumber(
-        variantsResult.count ?? 0
+        dashboardData.variantsCount
       ),
     },
     {
       label: "Warehouse",
       value: formatNumber(
-        warehousesResult.count ?? 0
+        dashboardData.warehousesCount
       ),
     },
     {
       label: "Stock Areas",
       value: formatNumber(
-        stockAreasResult.count ?? 0
+        dashboardData.stockAreasCount
       ),
     },
   ];
@@ -140,17 +218,17 @@ export default async function Home() {
       area: "NORMAL",
       description:
         "Area Stok Normal / Siap Jual",
-      quantity: normalStock,
+      quantity: dashboardData.normalStock,
     },
     {
       area: "DEFECT",
       description: "Area Stok Defect",
-      quantity: defectStock,
+      quantity: dashboardData.defectStock,
     },
     {
       area: "REJECT",
       description: "Area Stok Reject",
-      quantity: rejectStock,
+      quantity: dashboardData.rejectStock,
     },
   ];
 
@@ -160,7 +238,7 @@ export default async function Home() {
 
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 p-6 md:p-10">
+        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-7xl">
 
             <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -183,107 +261,121 @@ export default async function Home() {
               </div>
             </header>
 
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {stats.map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-                >
-                  <p className="text-sm font-medium text-slate-500">
-                    {item.label}
-                  </p>
-
-                  <p className="mt-3 text-3xl font-bold tracking-tight">
-                    {item.value}
-                  </p>
-
-                  <p className="mt-2 text-xs text-slate-400">
-                    {item.description}
-                  </p>
-                </div>
-              ))}
-            </section>
-
-            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold">
-                  Warehouse Summary
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Ringkasan data master WMS
-                </p>
+            {errorMessage && (
+              <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+                {errorMessage}
               </div>
+            )}
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {summary.map((item) => (
-                  <div
-                    key={item.label}
-                    className="rounded-xl bg-slate-50 p-5"
-                  >
+            {loading ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500 shadow-sm">
+                Memuat dashboard...
+              </div>
+            ) : (
+              <>
+                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  {stats.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                    >
+                      <p className="text-sm font-medium text-slate-500">
+                        {item.label}
+                      </p>
+
+                      <p className="mt-3 text-3xl font-bold tracking-tight">
+                        {item.value}
+                      </p>
+
+                      <p className="mt-2 text-xs text-slate-400">
+                        {item.description}
+                      </p>
+                    </div>
+                  ))}
+                </section>
+
+                <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="mb-6">
+                    <h2 className="text-lg font-semibold">
+                      Warehouse Summary
+                    </h2>
+
                     <p className="text-sm text-slate-500">
-                      {item.label}
-                    </p>
-
-                    <p className="mt-2 text-2xl font-semibold">
-                      {item.value}
+                      Ringkasan data master WMS
                     </p>
                   </div>
-                ))}
-              </div>
-            </section>
 
-            <section className="mt-6 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-200 p-6">
-                <h2 className="text-lg font-semibold">
-                  Stock by Area
-                </h2>
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {summary.map((item) => (
+                      <div
+                        key={item.label}
+                        className="rounded-xl bg-slate-50 p-5"
+                      >
+                        <p className="text-sm text-slate-500">
+                          {item.label}
+                        </p>
 
-                <p className="text-sm text-slate-500">
-                  Kondisi stok berdasarkan area gudang
-                </p>
-              </div>
-
-              <div className="w-full max-w-full overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-6 py-4 font-medium">
-                        Area
-                      </th>
-
-                      <th className="px-6 py-4 font-medium">
-                        Description
-                      </th>
-
-                      <th className="px-6 py-4 text-right font-medium">
-                        Quantity
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {stockAreaRows.map((item) => (
-                      <tr key={item.area}>
-                        <td className="px-6 py-4 font-medium">
-                          {item.area}
-                        </td>
-
-                        <td className="px-6 py-4 text-slate-500">
-                          {item.description}
-                        </td>
-
-                        <td className="px-6 py-4 text-right font-semibold">
-                          {formatNumber(
-                            item.quantity
-                          )}
-                        </td>
-                      </tr>
+                        <p className="mt-2 text-2xl font-semibold">
+                          {item.value}
+                        </p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                  </div>
+                </section>
+
+                <section className="mt-6 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 p-6">
+                    <h2 className="text-lg font-semibold">
+                      Stock by Area
+                    </h2>
+
+                    <p className="text-sm text-slate-500">
+                      Kondisi stok berdasarkan area gudang
+                    </p>
+                  </div>
+
+                  <div className="w-full max-w-full overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="px-6 py-4 font-medium">
+                            Area
+                          </th>
+
+                          <th className="px-6 py-4 font-medium">
+                            Description
+                          </th>
+
+                          <th className="px-6 py-4 text-right font-medium">
+                            Quantity
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-slate-100">
+                        {stockAreaRows.map((item) => (
+                          <tr key={item.area}>
+                            <td className="px-6 py-4 font-medium">
+                              {item.area}
+                            </td>
+
+                            <td className="px-6 py-4 text-slate-500">
+                              {item.description}
+                            </td>
+
+                            <td className="px-6 py-4 text-right font-semibold">
+                              {formatNumber(
+                                item.quantity
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            )}
 
           </div>
         </main>

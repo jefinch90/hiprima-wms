@@ -1,9 +1,15 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
-import Sidebar from "@/components/Sidebar";
+"use client";
 
-export const dynamic = "force-dynamic";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { useRouter } from "next/navigation";
+import Sidebar from "@/components/Sidebar";
+import { createClient } from "@/utils/supabase/client";
 
 type LocationRow = {
   location_id: string;
@@ -12,9 +18,9 @@ type LocationRow = {
   area_code: string;
   area_name: string;
   is_active: boolean;
-  sku_count: number;
-  total_qty: number;
-  total_count: number;
+  sku_count: number | string;
+  total_qty: number | string;
+  total_count: number | string;
 };
 
 type LocationInventoryRow = {
@@ -25,185 +31,140 @@ type LocationInventoryRow = {
   brand: string | null;
   color: string | null;
   size: string | null;
-  qty: number;
+  qty: number | string;
 };
 
-export default async function LocationsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    q?: string;
-    page?: string;
-    location?: string;
-  }>;
-}) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const params = await searchParams;
-
-  const search = params.q?.trim() ?? "";
-  const locationId =
-    params.location ?? "";
-
-  const currentPage = Math.max(
-    Number(params.page ?? "1") || 1,
-    1
-  );
+export default function LocationsPage() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
 
   const pageSize = 50;
-  const offset = (currentPage - 1) * pageSize;
 
-  const { data, error } = await supabase.rpc(
-    "get_locations_summary",
-    {
-      p_search: search || null,
-      p_limit: pageSize,
-      p_offset: offset,
+  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const [inventory, setInventory] = useState<LocationInventoryRow[]>([]);
+
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const [selectedLocation, setSelectedLocation] =
+    useState<LocationRow | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const loadLocations = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage("");
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.replace("/login");
+      return;
     }
-  );
 
-  if (error) {
-    throw new Error(
-      `Locations error: ${error.message}`
+    const offset = (currentPage - 1) * pageSize;
+
+    const { data, error } = await supabase.rpc(
+      "get_locations_summary",
+      {
+        p_search: search || null,
+        p_limit: pageSize,
+        p_offset: offset,
+      }
     );
-  }
 
-  const locations =
-    (data ?? []) as LocationRow[];
+    if (error) {
+      setLocations([]);
+      setTotalCount(0);
+      setErrorMessage(error.message);
+      setLoading(false);
+      return;
+    }
 
-  const totalCount = Number(
-    locations[0]?.total_count ?? 0
-  );
+    const rows = (data ?? []) as LocationRow[];
+
+    setLocations(rows);
+    setTotalCount(Number(rows[0]?.total_count ?? 0));
+    setLoading(false);
+  }, [currentPage, router, search, supabase]);
+
+  useEffect(() => {
+    loadLocations();
+  }, [loadLocations]);
 
   const totalPages = Math.max(
     Math.ceil(totalCount / pageSize),
     1
   );
 
-  let selectedLocation:
-    | LocationRow
-    | null = null;
+  const formatNumber = (
+    value: number | string | null | undefined
+  ) => Number(value ?? 0).toLocaleString("id-ID");
 
-  let locationInventory:
-    LocationInventoryRow[] = [];
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-  if (locationId) {
-    selectedLocation =
-      locations.find(
-        (item) =>
-          item.location_id === locationId
-      ) ?? null;
-
-    if (!selectedLocation) {
-      const { data: locationData } =
-        await supabase
-          .from("locations")
-          .select(`
-            id,
-            code,
-            name,
-            is_active,
-            stock_areas (
-              code,
-              name
-            )
-          `)
-          .eq("id", locationId)
-          .single();
-
-      if (locationData) {
-        const area = Array.isArray(
-          locationData.stock_areas
-        )
-          ? locationData.stock_areas[0]
-          : locationData.stock_areas;
-
-        selectedLocation = {
-          location_id: locationData.id,
-          location_code:
-            locationData.code,
-          location_name:
-            locationData.name,
-          area_code:
-            area?.code ?? "-",
-          area_name:
-            area?.name ?? "-",
-          is_active:
-            locationData.is_active,
-          sku_count: 0,
-          total_qty: 0,
-          total_count: 0,
-        };
-      }
-    }
-
-    const {
-      data: inventoryData,
-      error: inventoryError,
-    } = await supabase.rpc(
-      "get_location_inventory",
-      {
-        p_location_id: locationId,
-      }
-    );
-
-    if (inventoryError) {
-      throw new Error(
-        `Location inventory error: ${inventoryError.message}`
-      );
-    }
-
-    locationInventory =
-      (inventoryData ??
-        []) as LocationInventoryRow[];
+    setSelectedLocation(null);
+    setInventory([]);
+    setCurrentPage(1);
+    setSearch(searchInput.trim());
   }
 
-  const formatNumber = (value: number) =>
-    Number(value ?? 0).toLocaleString(
-      "id-ID"
+  function handleReset() {
+    setSearchInput("");
+    setSearch("");
+    setCurrentPage(1);
+    setSelectedLocation(null);
+    setInventory([]);
+    setErrorMessage("");
+  }
+
+  async function handleSelectLocation(location: LocationRow) {
+    setSelectedLocation(location);
+    setInventory([]);
+    setDetailLoading(true);
+    setErrorMessage("");
+
+    const { data, error } = await supabase.rpc(
+      "get_location_inventory",
+      {
+        p_location_id: location.location_id,
+      }
     );
 
-  const makePageUrl = (page: number) => {
-    const query =
-      new URLSearchParams();
-
-    if (search) {
-      query.set("q", search);
+    if (error) {
+      setErrorMessage(error.message);
+      setDetailLoading(false);
+      return;
     }
 
-    query.set(
-      "page",
-      String(page)
+    setInventory(
+      (data ?? []) as LocationInventoryRow[]
     );
 
-    return `/locations?${query.toString()}`;
-  };
+    setDetailLoading(false);
+  }
 
-  const detailTotalQty =
-    locationInventory.reduce(
-      (total, item) =>
-        total +
-        Number(item.qty ?? 0),
-      0
-    );
+  function changePage(page: number) {
+    setSelectedLocation(null);
+    setInventory([]);
+    setCurrentPage(page);
+  }
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
-
       <div className="flex min-h-screen w-full max-w-full">
 
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 p-6 md:p-10">
-
+        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
 
             <header className="mb-8">
@@ -216,15 +177,21 @@ export default async function LocationsPage({
               </h1>
 
               <p className="mt-2 text-sm text-slate-500">
-                Monitoring lokasi rak dan isi stok gudang
+                Monitoring rack dan lokasi stok gudang
               </p>
             </header>
 
-            {selectedLocation && (
-              <section className="mb-6 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            {errorMessage && (
+              <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+                {errorMessage}
+              </div>
+            )}
 
-                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
+            {selectedLocation && (
+              <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+                <div className="flex flex-col gap-4 border-b border-slate-200 p-6 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
                     <div className="text-sm text-slate-500">
                       Location Detail
                     </div>
@@ -233,166 +200,158 @@ export default async function LocationsPage({
                       {selectedLocation.location_code}
                     </h2>
 
-                    <div className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-slate-500">
                       {selectedLocation.location_name}
-                    </div>
+                    </p>
                   </div>
 
-                  <Link
-                    href="/locations"
-                    className="shrink-0 rounded-xl border border-slate-300 px-4 py-2 text-center text-sm"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedLocation(null);
+                      setInventory([]);
+                    }}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
                   >
                     Close
-                  </Link>
+                  </button>
                 </div>
 
-                <div className="mb-6 grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-xl bg-slate-50 p-4">
-                    <div className="text-sm text-slate-500">
+                    <div className="text-xs text-slate-500">
                       Area
                     </div>
-
-                    <div className="mt-2 font-semibold">
+                    <div className="mt-1 font-semibold">
                       {selectedLocation.area_code}
                     </div>
                   </div>
 
                   <div className="rounded-xl bg-slate-50 p-4">
-                    <div className="text-sm text-slate-500">
+                    <div className="text-xs text-slate-500">
                       SKU
                     </div>
-
-                    <div className="mt-2 text-xl font-bold">
-                      {formatNumber(
-                        locationInventory.length
-                      )}
+                    <div className="mt-1 text-xl font-bold">
+                      {formatNumber(selectedLocation.sku_count)}
                     </div>
                   </div>
 
                   <div className="rounded-xl bg-slate-50 p-4">
-                    <div className="text-sm text-slate-500">
+                    <div className="text-xs text-slate-500">
                       Total Qty
                     </div>
+                    <div className="mt-1 text-xl font-bold">
+                      {formatNumber(selectedLocation.total_qty)}
+                    </div>
+                  </div>
 
-                    <div className="mt-2 text-xl font-bold">
-                      {formatNumber(
-                        detailTotalQty
-                      )}
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Status
+                    </div>
+                    <div className="mt-1 font-semibold">
+                      {selectedLocation.is_active
+                        ? "Active"
+                        : "Inactive"}
                     </div>
                   </div>
                 </div>
 
-                <div className="w-full max-w-full overflow-x-auto">
-                  <table className="w-full text-left text-sm">
+                {detailLoading ? (
+                  <div className="border-t border-slate-200 p-10 text-center text-sm text-slate-500">
+                    Memuat detail lokasi...
+                  </div>
+                ) : (
+                  <div className="w-full max-w-full overflow-x-auto border-t border-slate-200">
+                    <table className="w-full min-w-[850px] text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="px-5 py-4">SKU</th>
+                          <th className="px-5 py-4">Product</th>
+                          <th className="px-5 py-4">Variant</th>
+                          <th className="px-5 py-4 text-right">
+                            Qty
+                          </th>
+                        </tr>
+                      </thead>
 
-                    <thead className="bg-slate-50 text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3">
-                          SKU
-                        </th>
-
-                        <th className="px-4 py-3">
-                          Product
-                        </th>
-
-                        <th className="px-4 py-3">
-                          Variant
-                        </th>
-
-                        <th className="px-4 py-3 text-right">
-                          Qty
-                        </th>
-                      </tr>
-                    </thead>
-
-                    <tbody className="divide-y divide-slate-100">
-                      {locationInventory.map(
-                        (item) => (
-                          <tr
-                            key={
-                              item.variant_id
-                            }
-                            className="hover:bg-slate-50"
-                          >
-                            <td className="px-4 py-3 font-semibold">
+                      <tbody className="divide-y divide-slate-100">
+                        {inventory.map((item) => (
+                          <tr key={item.variant_id}>
+                            <td className="px-5 py-4 font-semibold">
                               {item.sku}
                             </td>
 
-                            <td className="px-4 py-3">
-                              <div>
-                                {item.product_name}
-                              </div>
-
-                              <div className="text-xs text-slate-400">
+                            <td className="px-5 py-4">
+                              <div>{item.product_name}</div>
+                              <div className="mt-1 text-xs text-slate-400">
                                 {item.product_code}
                               </div>
                             </td>
 
-                            <td className="px-4 py-3">
-                              {item.color ?? "-"} /{" "}
+                            <td className="px-5 py-4">
+                              {item.color ?? "-"} • Size{" "}
                               {item.size ?? "-"}
                             </td>
 
-                            <td className="px-4 py-3 text-right font-bold">
-                              {formatNumber(
-                                item.qty
-                              )}
+                            <td className="px-5 py-4 text-right font-bold">
+                              {formatNumber(item.qty)}
                             </td>
                           </tr>
-                        )
-                      )}
+                        ))}
 
-                      {locationInventory.length ===
-                        0 && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-4 py-10 text-center text-slate-500"
-                          >
-                            Tidak ada stok di lokasi ini.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-
-                  </table>
-                </div>
+                        {inventory.length === 0 && (
+                          <tr>
+                            <td
+                              colSpan={4}
+                              className="px-5 py-10 text-center text-slate-500"
+                            >
+                              Tidak ada stok pada lokasi ini.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
               </section>
             )}
 
-            <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <form
-                action="/locations"
-                method="GET"
-                className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
+                onSubmit={handleSearch}
+                className="flex flex-col gap-3 lg:flex-row"
               >
                 <input
-                  name="q"
-                  defaultValue={search}
-                  placeholder="Cari kode rak, nama lokasi, NORMAL, DEFECT..."
+                  value={searchInput}
+                  onChange={(event) =>
+                    setSearchInput(event.target.value)
+                  }
+                  placeholder="Cari kode rack atau nama lokasi..."
                   className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                 />
 
                 <button
                   type="submit"
-                  className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
+                  className="rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
                 >
                   Search
                 </button>
 
                 {search && (
-                  <Link
-                    href="/locations"
-                    className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-center text-sm"
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="rounded-xl border border-slate-300 px-5 py-3 text-sm"
                   >
                     Reset
-                  </Link>
+                  </button>
                 )}
               </form>
             </section>
 
-            <section className="w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -405,54 +364,43 @@ export default async function LocationsPage({
                   </p>
                 </div>
 
-                <div className="shrink-0 text-sm text-slate-500">
+                <div className="text-sm text-slate-500">
                   Page {currentPage} of {totalPages}
                 </div>
               </div>
 
-              <div className="w-full max-w-full overflow-x-auto">
-                <table className="w-full text-left text-sm">
+              {loading ? (
+                <div className="p-12 text-center text-sm text-slate-500">
+                  Memuat locations...
+                </div>
+              ) : (
+                <div className="w-full max-w-full overflow-x-auto">
+                  <table className="w-full min-w-[850px] text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-5 py-4">Location</th>
+                        <th className="px-5 py-4">Area</th>
+                        <th className="px-5 py-4">Status</th>
+                        <th className="px-5 py-4 text-right">
+                          SKU
+                        </th>
+                        <th className="px-5 py-4 text-right">
+                          Qty
+                        </th>
+                        <th className="px-5 py-4"></th>
+                      </tr>
+                    </thead>
 
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-5 py-4">
-                        Location
-                      </th>
-
-                      <th className="px-5 py-4">
-                        Area
-                      </th>
-
-                      <th className="px-5 py-4 text-right">
-                        SKU
-                      </th>
-
-                      <th className="px-5 py-4 text-right">
-                        Qty
-                      </th>
-
-                      <th className="px-5 py-4">
-                        Status
-                      </th>
-
-                      <th className="px-5 py-4"></th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {locations.map(
-                      (location) => (
+                    <tbody className="divide-y divide-slate-100">
+                      {locations.map((location) => (
                         <tr
-                          key={
-                            location.location_id
-                          }
+                          key={location.location_id}
                           className="hover:bg-slate-50"
                         >
                           <td className="px-5 py-4">
                             <div className="font-semibold">
                               {location.location_code}
                             </div>
-
                             <div className="text-xs text-slate-400">
                               {location.location_name}
                             </div>
@@ -462,18 +410,6 @@ export default async function LocationsPage({
                             {location.area_code}
                           </td>
 
-                          <td className="px-5 py-4 text-right">
-                            {formatNumber(
-                              location.sku_count
-                            )}
-                          </td>
-
-                          <td className="px-5 py-4 text-right font-semibold">
-                            {formatNumber(
-                              location.total_qty
-                            )}
-                          </td>
-
                           <td className="px-5 py-4">
                             {location.is_active
                               ? "Active"
@@ -481,72 +417,80 @@ export default async function LocationsPage({
                           </td>
 
                           <td className="px-5 py-4 text-right">
-                            <Link
-                              href={`/locations?location=${location.location_id}`}
+                            {formatNumber(location.sku_count)}
+                          </td>
+
+                          <td className="px-5 py-4 text-right font-semibold">
+                            {formatNumber(location.total_qty)}
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSelectLocation(location)
+                              }
                               className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium"
                             >
                               View
-                            </Link>
+                            </button>
                           </td>
                         </tr>
-                      )
-                    )}
+                      ))}
 
-                    {locations.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className="px-5 py-12 text-center text-slate-500"
-                        >
-                          Tidak ada lokasi ditemukan.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-
-                </table>
-              </div>
+                      {locations.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="px-5 py-12 text-center text-slate-500"
+                          >
+                            Tidak ada lokasi ditemukan.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div className="flex flex-col gap-4 border-t border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-slate-500">
-                  Menampilkan maksimal {pageSize} lokasi per halaman
+                  Maksimal {pageSize} lokasi per halaman
                 </div>
 
-                <div className="flex shrink-0 gap-2">
-                  {currentPage > 1 ? (
-                    <Link
-                      href={makePageUrl(
-                        currentPage - 1
-                      )}
-                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
-                    >
-                      Previous
-                    </Link>
-                  ) : (
-                    <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
-                      Previous
-                    </span>
-                  )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() =>
+                      changePage(
+                        Math.max(currentPage - 1, 1)
+                      )
+                    }
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:border-slate-200 disabled:text-slate-300"
+                  >
+                    Previous
+                  </button>
 
-                  {currentPage < totalPages ? (
-                    <Link
-                      href={makePageUrl(
-                        currentPage + 1
-                      )}
-                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium"
-                    >
-                      Next
-                    </Link>
-                  ) : (
-                    <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-300">
-                      Next
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() =>
+                      changePage(
+                        Math.min(
+                          currentPage + 1,
+                          totalPages
+                        )
+                      )
+                    }
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:border-slate-200 disabled:text-slate-300"
+                  >
+                    Next
+                  </button>
                 </div>
               </div>
 
             </section>
-
           </div>
         </main>
       </div>
