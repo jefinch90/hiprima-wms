@@ -162,7 +162,7 @@ export default function StockMovementPage() {
                 PT Prima Berkah Mulia
               </p>
 
-              <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="mt-1 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
                   <h1 className="text-3xl font-bold">
                     Stock Movement
@@ -174,12 +174,19 @@ export default function StockMovementPage() {
                   </p>
                 </div>
 
-                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+                <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
                   <Link
                     href="/stock-movement/inbound"
                     className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white sm:w-auto"
                   >
                     Inbound Stock
+                  </Link>
+
+                  <Link
+                    href="/stock-movement/outbound"
+                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 sm:w-auto"
+                  >
+                    Outbound Stock
                   </Link>
 
                   <Link
