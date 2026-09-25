@@ -33,6 +33,7 @@ const menuItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+
   const [mobileOpen, setMobileOpen] =
     useState(false);
 
@@ -52,8 +53,7 @@ export default function Sidebar() {
     const previousOverflow =
       document.body.style.overflow;
 
-    document.body.style.overflow =
-      "hidden";
+    document.body.style.overflow = "hidden";
 
     return () => {
       document.body.style.overflow =
@@ -63,101 +63,26 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* =========================
+      {/* =====================================================
           DESKTOP SIDEBAR
-      ========================= */}
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white p-6 lg:block">
-        <div className="mb-10">
-          <div className="text-xl font-bold tracking-tight">
-            Hi.PRIMA
-          </div>
+      ====================================================== */}
 
-          <div className="text-sm text-slate-500">
-            Warehouse Management System
-          </div>
-        </div>
-
-        <nav className="space-y-2">
-          {menuItems.map((item) => {
-            const active = isActive(
-              item.href
-            );
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={
-                  active
-                    ? "block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
-                    : "block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
-                }
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
-
-      {/* =========================
-          MOBILE MENU BUTTON
-      ========================= */}
-      <button
-        type="button"
-        onClick={() =>
-          setMobileOpen(true)
-        }
-        aria-label="Buka menu"
-        className="fixed bottom-5 left-5 z-40 flex h-14 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white shadow-lg lg:hidden"
-      >
-        <span className="text-xl leading-none">
-          ☰
-        </span>
-
-        <span>Menu</span>
-      </button>
-
-      {/* =========================
-          MOBILE OVERLAY
-      ========================= */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button
-            type="button"
-            aria-label="Tutup menu"
-            onClick={() =>
-              setMobileOpen(false)
-            }
-            className="absolute inset-0 bg-slate-950/40"
-          />
-
-          {/* MOBILE DRAWER */}
-          <aside className="absolute inset-y-0 left-0 flex w-[82%] max-w-xs flex-col border-r border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="mb-8 flex items-start justify-between gap-4">
-              <div>
-                <div className="text-xl font-bold tracking-tight">
-                  Hi.PRIMA
-                </div>
-
-                <div className="mt-1 text-sm text-slate-500">
-                  Warehouse Management System
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setMobileOpen(false)
-                }
-                aria-label="Tutup menu"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-xl text-slate-600"
-              >
-                ×
-              </button>
+      <aside className="hidden w-[272px] shrink-0 border-r border-slate-200 bg-white lg:block">
+        <div className="sticky top-0 flex h-screen flex-col overflow-y-auto">
+          <div className="px-6 pb-8 pt-8">
+            <div className="text-xl font-bold text-slate-900">
+              Hi.PRIMA
             </div>
 
-            <nav className="space-y-2">
+            <div className="mt-1 text-sm leading-5 text-slate-500">
+              Warehouse Management
+              <br />
+              System
+            </div>
+          </div>
+
+          <nav className="flex-1 px-6">
+            <div className="space-y-2">
               {menuItems.map((item) => {
                 const active = isActive(
                   item.href
@@ -167,23 +92,119 @@ export default function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    onClick={() =>
-                      setMobileOpen(false)
-                    }
                     className={
                       active
                         ? "block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
-                        : "block rounded-xl px-4 py-3 text-sm text-slate-600 hover:bg-slate-50"
+                        : "block rounded-xl px-4 py-3 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                     }
                   >
                     {item.label}
                   </Link>
                 );
               })}
+            </div>
+          </nav>
+
+          <div className="px-6 pb-7 pt-8">
+            <div className="border-t border-slate-200 pt-5">
+              <div className="text-xs text-slate-400">
+                PT Prima Berkah Mulia
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* =====================================================
+          MOBILE MENU BUTTON
+          Compact supaya tidak menutupi tombol form
+      ====================================================== */}
+
+      <button
+        type="button"
+        aria-label="Open navigation menu"
+        onClick={() =>
+          setMobileOpen(true)
+        }
+        className="fixed bottom-5 left-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-2xl font-medium text-white shadow-lg lg:hidden"
+      >
+        ☰
+      </button>
+
+      {/* =====================================================
+          MOBILE DRAWER
+      ====================================================== */}
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          {/* Overlay */}
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() =>
+              setMobileOpen(false)
+            }
+            className="absolute inset-0 bg-slate-950/40"
+          />
+
+          {/* Drawer */}
+          <aside className="absolute inset-y-0 left-0 flex w-[82%] max-w-[320px] flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-6">
+              <div>
+                <div className="text-xl font-bold text-slate-900">
+                  Hi.PRIMA
+                </div>
+
+                <div className="mt-1 text-sm leading-5 text-slate-500">
+                  Warehouse Management
+                  <br />
+                  System
+                </div>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() =>
+                  setMobileOpen(false)
+                }
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-2xl leading-none text-slate-600"
+              >
+                ×
+              </button>
+            </div>
+
+            <nav className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+              <div className="space-y-2">
+                {menuItems.map((item) => {
+                  const active = isActive(
+                    item.href
+                  );
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() =>
+                        setMobileOpen(false)
+                      }
+                      className={
+                        active
+                          ? "block rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white"
+                          : "block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                      }
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
             </nav>
 
-            <div className="mt-auto border-t border-slate-200 pt-5 text-xs text-slate-400">
-              PT Prima Berkah Mulia
+            <div className="border-t border-slate-200 px-6 py-5">
+              <div className="text-xs text-slate-400">
+                PT Prima Berkah Mulia
+              </div>
             </div>
           </aside>
         </div>
