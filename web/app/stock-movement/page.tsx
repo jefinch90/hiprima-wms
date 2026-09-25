@@ -48,7 +48,9 @@ export default function StockMovementPage() {
 
   const pageSize = 50;
 
-  const [movements, setMovements] = useState<MovementRow[]>([]);
+  const [movements, setMovements] = useState<MovementRow[]>(
+    []
+  );
 
   const [searchInput, setSearchInput] = useState("");
   const [typeInput, setTypeInput] = useState("");
@@ -162,7 +164,7 @@ export default function StockMovementPage() {
                 PT Prima Berkah Mulia
               </p>
 
-              <div className="mt-1 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="mt-1 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                 <div className="min-w-0">
                   <h1 className="text-3xl font-bold">
                     Stock Movement
@@ -174,26 +176,33 @@ export default function StockMovementPage() {
                   </p>
                 </div>
 
-                <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:flex xl:w-auto xl:flex-row">
                   <Link
                     href="/stock-movement/inbound"
-                    className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white sm:w-auto"
+                    className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white xl:w-auto"
                   >
                     Inbound Stock
                   </Link>
 
                   <Link
                     href="/stock-movement/outbound"
-                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 sm:w-auto"
+                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
                   >
                     Outbound Stock
                   </Link>
 
                   <Link
                     href="/stock-movement/transfer"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 sm:w-auto"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
                   >
                     Transfer Stock
+                  </Link>
+
+                  <Link
+                    href="/stock-movement/adjustment"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
+                  >
+                    Stock Adjustment
                   </Link>
                 </div>
               </div>
@@ -226,21 +235,11 @@ export default function StockMovementPage() {
                   }
                   className="min-w-0 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
                 >
-                  <option value="">
-                    All Movement
-                  </option>
-                  <option value="opening">
-                    Opening
-                  </option>
-                  <option value="inbound">
-                    Inbound
-                  </option>
-                  <option value="outbound">
-                    Outbound
-                  </option>
-                  <option value="transfer">
-                    Transfer
-                  </option>
+                  <option value="">All Movement</option>
+                  <option value="opening">Opening</option>
+                  <option value="inbound">Inbound</option>
+                  <option value="outbound">Outbound</option>
+                  <option value="transfer">Transfer</option>
                   <option value="adjustment_in">
                     Adjustment In
                   </option>
@@ -431,15 +430,14 @@ export default function StockMovementPage() {
                           )
                         )}
 
-                        {movements.length ===
-                          0 && (
+                        {movements.length === 0 && (
                           <tr>
                             <td
                               colSpan={9}
                               className="px-5 py-12 text-center text-slate-500"
                             >
-                              Tidak ada stock
-                              movement ditemukan.
+                              Tidak ada stock movement
+                              ditemukan.
                             </td>
                           </tr>
                         )}
