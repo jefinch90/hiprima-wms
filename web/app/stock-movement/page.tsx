@@ -176,33 +176,47 @@ export default function StockMovementPage() {
                   </p>
                 </div>
 
-                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:flex xl:w-auto xl:flex-row">
+                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto xl:min-w-[720px]">
                   <Link
                     href="/stock-movement/inbound"
-                    className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white xl:w-auto"
+                    className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white"
                   >
                     Inbound Stock
                   </Link>
 
                   <Link
                     href="/stock-movement/outbound"
-                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
+                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
                   >
                     Outbound Stock
                   </Link>
 
                   <Link
                     href="/stock-movement/transfer"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
                   >
                     Transfer Stock
                   </Link>
 
                   <Link
                     href="/stock-movement/adjustment"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900 xl:w-auto"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
                   >
                     Stock Adjustment
+                  </Link>
+
+                  <Link
+                    href="/stock-movement/return-in"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                  >
+                    Return In
+                  </Link>
+
+                  <Link
+                    href="/stock-movement/return-out"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                  >
+                    Return Out
                   </Link>
                 </div>
               </div>
@@ -560,6 +574,13 @@ export default function StockMovementPage() {
                           </div>
                         </div>
                       )
+                    )}
+
+                    {movements.length === 0 && (
+                      <div className="p-10 text-center text-sm text-slate-500">
+                        Tidak ada stock movement
+                        ditemukan.
+                      </div>
                     )}
                   </div>
                 </>
