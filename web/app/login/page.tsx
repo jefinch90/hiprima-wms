@@ -1,28 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleLogin(
+    e: FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
 
     setLoading(true);
     setError("");
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
     if (error) {
       setError("Email atau password salah.");
@@ -51,7 +55,10 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-5">
+        <form
+          onSubmit={handleLogin}
+          className="space-y-5"
+        >
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
               Email
@@ -60,23 +67,38 @@ export default function LoginPage() {
             <input
               type="email"
               required
+              autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
               placeholder="email@company.com"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Password
-            </label>
+            <div className="mb-2 flex items-center justify-between gap-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Password
+              </label>
+
+              <Link
+                href="/forgot-password"
+                className="text-sm font-medium text-slate-600 hover:text-slate-900"
+              >
+                Lupa Password?
+              </Link>
+            </div>
 
             <input
               type="password"
               required
+              autoComplete="current-password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) =>
+                setPassword(e.target.value)
+              }
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
               placeholder="••••••••"
             />
@@ -93,7 +115,9 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full rounded-xl bg-slate-900 px-4 py-3 font-medium text-white disabled:opacity-60"
           >
-            {loading ? "Signing in..." : "Login"}
+            {loading
+              ? "Signing in..."
+              : "Login"}
           </button>
         </form>
       </div>

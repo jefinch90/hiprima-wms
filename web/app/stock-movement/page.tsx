@@ -12,6 +12,13 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
 
+type AppRole =
+  | "owner"
+  | "admin"
+  | "warehouse_manager"
+  | "warehouse_staff"
+  | "viewer";
+
 type MovementRow = {
   movement_id: string;
   movement_no: number | string;
@@ -48,6 +55,10 @@ export default function StockMovementPage() {
 
   const pageSize = 50;
 
+  const [userRole, setUserRole] = useState<AppRole | null>(
+    null
+  );
+
   const [movements, setMovements] = useState<MovementRow[]>(
     []
   );
@@ -76,6 +87,30 @@ export default function StockMovementPage() {
       router.replace("/login");
       return;
     }
+
+    const { data: profile, error: profileError } =
+      await supabase
+        .from("profiles")
+        .select("role, is_active")
+        .eq("id", user.id)
+        .single();
+
+    if (profileError || !profile) {
+      setErrorMessage(
+        profileError?.message ??
+          "Profile WMS tidak ditemukan."
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (!profile.is_active) {
+      setErrorMessage("Akun WMS tidak aktif.");
+      setLoading(false);
+      return;
+    }
+
+    setUserRole(profile.role as AppRole);
 
     const offset = (currentPage - 1) * pageSize;
 
@@ -118,6 +153,19 @@ export default function StockMovementPage() {
     Math.ceil(totalCount / pageSize),
     1
   );
+
+  const canWarehouseTransaction =
+    userRole === "owner" ||
+    userRole === "admin" ||
+    userRole === "warehouse_manager" ||
+    userRole === "warehouse_staff";
+
+  const canAdjustment =
+    userRole === "owner" ||
+    userRole === "admin" ||
+    userRole === "warehouse_manager";
+
+  const isViewer = userRole === "viewer";
 
   const formatNumber = (
     value: number | string | null | undefined
@@ -176,49 +224,59 @@ export default function StockMovementPage() {
                   </p>
                 </div>
 
-                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto xl:min-w-[720px]">
-                  <Link
-                    href="/stock-movement/inbound"
-                    className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white"
-                  >
-                    Inbound Stock
-                  </Link>
+                {canWarehouseTransaction && (
+                  <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto xl:min-w-[720px]">
+                    <Link
+                      href="/stock-movement/inbound"
+                      className="w-full rounded-xl bg-slate-900 px-5 py-3 text-center text-sm font-medium text-white"
+                    >
+                      Inbound Stock
+                    </Link>
 
-                  <Link
-                    href="/stock-movement/outbound"
-                    className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
-                  >
-                    Outbound Stock
-                  </Link>
+                    <Link
+                      href="/stock-movement/outbound"
+                      className="w-full rounded-xl border border-slate-900 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                    >
+                      Outbound Stock
+                    </Link>
 
-                  <Link
-                    href="/stock-movement/transfer"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
-                  >
-                    Transfer Stock
-                  </Link>
+                    <Link
+                      href="/stock-movement/transfer"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                    >
+                      Transfer Stock
+                    </Link>
 
-                  <Link
-                    href="/stock-movement/adjustment"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
-                  >
-                    Stock Adjustment
-                  </Link>
+                    {canAdjustment && (
+                      <Link
+                        href="/stock-movement/adjustment"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                      >
+                        Stock Adjustment
+                      </Link>
+                    )}
 
-                  <Link
-                    href="/stock-movement/return-in"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
-                  >
-                    Return In
-                  </Link>
+                    <Link
+                      href="/stock-movement/return-in"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                    >
+                      Return In
+                    </Link>
 
-                  <Link
-                    href="/stock-movement/return-out"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
-                  >
-                    Return Out
-                  </Link>
-                </div>
+                    <Link
+                      href="/stock-movement/return-out"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium text-slate-900"
+                    >
+                      Return Out
+                    </Link>
+                  </div>
+                )}
+
+                {isViewer && (
+                  <div className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500">
+                    Read-only access
+                  </div>
+                )}
               </div>
             </header>
 

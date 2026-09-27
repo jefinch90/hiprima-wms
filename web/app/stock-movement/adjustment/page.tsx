@@ -83,6 +83,62 @@ export default function StockAdjustmentPage() {
 
       if (!user) {
         router.replace("/login");
+        return;
+      }
+
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("profiles")
+        .select("role, is_active")
+        .eq("id", user.id)
+        .single();
+
+      if (
+        profileError ||
+        !profile ||
+        !profile.is_active
+      ) {
+        window.alert(
+          [
+            "Akses Ditolak",
+            "",
+            "Akun WMS tidak aktif atau profile tidak ditemukan.",
+          ].join("\n")
+        );
+
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
+      const allowedRoles = [
+        "owner",
+        "admin",
+        "warehouse_manager",
+      ];
+
+      if (!allowedRoles.includes(profile.role)) {
+        const roleLabel =
+          profile.role === "warehouse_staff"
+            ? "Warehouse Staff"
+            : profile.role === "viewer"
+              ? "Viewer"
+              : profile.role;
+
+        window.alert(
+          [
+            "Akses Ditolak",
+            "",
+            `Role ${roleLabel} tidak memiliki izin melakukan Stock Adjustment.`,
+            "",
+            "Silakan kembali ke Stock Movement.",
+          ].join("\n")
+        );
+
+        router.replace("/stock-movement");
+        return;
       }
     }
 
@@ -349,7 +405,34 @@ export default function StockAdjustmentPage() {
     );
 
     if (error) {
-      setErrorMessage(error.message);
+      const message = error.message;
+
+      setErrorMessage(message);
+
+      const normalizedMessage =
+        message.toLowerCase();
+
+      if (
+        normalizedMessage.includes(
+          "akses ditolak"
+        ) ||
+        normalizedMessage.includes(
+          "permission denied"
+        )
+      ) {
+        window.alert(
+          [
+            "Akses Ditolak",
+            "",
+            message,
+            "",
+            "Transaksi tidak diproses.",
+          ].join("\n")
+        );
+
+        router.replace("/stock-movement");
+      }
+
       setProcessing(false);
       return;
     }
