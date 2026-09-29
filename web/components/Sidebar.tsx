@@ -1,10 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  usePathname,
-  useRouter,
-} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -12,51 +9,19 @@ import {
 } from "react";
 import { createClient } from "@/utils/supabase/client";
 
-type AppRole =
-  | "owner"
-  | "admin"
-  | "warehouse_manager"
-  | "warehouse_staff"
-  | "viewer";
-
-type MenuItem = {
-  label: string;
-  href: string;
-  adminOnly?: boolean;
-};
-
-type UserProfile = {
+type Profile = {
   full_name: string | null;
-  role: AppRole;
+  role: string;
+  is_active: boolean;
 };
 
-const menuItems: MenuItem[] = [
-  {
-    label: "Dashboard",
-    href: "/",
-  },
-  {
-    label: "Products",
-    href: "/products",
-  },
-  {
-    label: "Inventory",
-    href: "/inventory",
-  },
-  {
-    label: "Stock Movement",
-    href: "/stock-movement",
-  },
-  {
-    label: "Locations",
-    href: "/locations",
-  },
-  {
-    label: "Users",
-    href: "/users",
-    adminOnly: true,
-  },
-];
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  warehouse_manager: "Warehouse Manager",
+  warehouse_staff: "Warehouse Staff",
+  viewer: "Viewer",
+};
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -68,27 +33,27 @@ export default function Sidebar() {
   );
 
   const [profile, setProfile] =
-    useState<UserProfile | null>(null);
+    useState<Profile | null>(null);
 
   const [mobileOpen, setMobileOpen] =
     useState(false);
 
-  const [loggingOut, setLoggingOut] =
-    useState(false);
-
   useEffect(() => {
-    let active = true;
+    let mounted = true;
 
     async function loadProfile() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user || !active) {
+      if (!mounted) return;
+
+      if (!user) {
+        router.replace("/login");
         return;
       }
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
         .select(
           "full_name, role, is_active"
@@ -96,65 +61,85 @@ export default function Sidebar() {
         .eq("id", user.id)
         .single();
 
+      if (!mounted) return;
+
       if (
-        active &&
-        data &&
-        data.is_active
+        error ||
+        !data ||
+        data.is_active !== true
       ) {
-        setProfile({
-          full_name: data.full_name,
-          role: data.role as AppRole,
-        });
+        await supabase.auth.signOut();
+
+        router.replace("/login");
+        return;
       }
+
+      setProfile(data as Profile);
     }
 
     loadProfile();
 
     return () => {
-      active = false;
+      mounted = false;
     };
-  }, [supabase]);
+  }, [router, supabase]);
 
   useEffect(() => {
     if (!mobileOpen) {
+      document.body.style.overflow = "";
       return;
     }
 
-    const previousOverflow =
-      document.body.style.overflow;
-
-    document.body.style.overflow =
-      "hidden";
+    document.body.style.overflow = "hidden";
 
     return () => {
-      document.body.style.overflow =
-        previousOverflow;
+      document.body.style.overflow = "";
     };
   }, [mobileOpen]);
 
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+  const role = profile?.role ?? "";
 
-  const canManageUsers =
-    profile?.role === "owner" ||
-    profile?.role === "admin";
+  const navItems = [
+    {
+      label: "Dashboard",
+      href: "/",
+      visible: true,
+    },
+    {
+      label: "Products",
+      href: "/products",
+      visible: true,
+    },
+    {
+      label: "Inventory",
+      href: "/inventory",
+      visible: true,
+    },
+    {
+      label: "Stock Movement",
+      href: "/stock-movement",
+      visible: true,
+    },
+    {
+      label: "Stock Opname",
+      href: "/stock-opname",
+      visible: true,
+    },
+    {
+      label: "Locations",
+      href: "/locations",
+      visible: true,
+    },
+    {
+      label: "Users",
+      href: "/users",
+      visible:
+        role === "owner" ||
+        role === "admin",
+    },
+  ];
 
-  const visibleMenuItems =
-    menuItems.filter((item) => {
-      if (
-        item.adminOnly &&
-        !canManageUsers
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-
-  function isActive(
-    href: string
-  ) {
+  function activeMenu(href: string) {
     if (href === "/") {
       return pathname === "/";
     }
@@ -167,216 +152,125 @@ export default function Sidebar() {
     );
   }
 
-  function formatRole(
-    role: AppRole
-  ) {
-    switch (role) {
-      case "owner":
-        return "Owner";
-
-      case "admin":
-        return "Admin";
-
-      case "warehouse_manager":
-        return "Warehouse Manager";
-
-      case "warehouse_staff":
-        return "Warehouse Staff";
-
-      case "viewer":
-        return "Viewer";
-
-      default:
-        return role;
-    }
-  }
-
   async function handleLogout() {
-    if (loggingOut) {
-      return;
-    }
-
-    setLoggingOut(true);
-
-    const { error } =
-      await supabase.auth.signOut();
-
-    if (error) {
-      alert(
-        `Logout gagal: ${error.message}`
-      );
-
-      setLoggingOut(false);
-      return;
-    }
-
     setMobileOpen(false);
-    setProfile(null);
+
+    await supabase.auth.signOut();
 
     router.replace("/login");
     router.refresh();
   }
 
-  function MenuLinks({
-    onNavigate,
-  }: {
-    onNavigate?: () => void;
-  }) {
+  function MenuContent() {
     return (
-      <nav className="mt-10 space-y-3">
-        {visibleMenuItems.map(
-          (item) => {
-            const active =
-              isActive(item.href);
+      <>
+        <div className="border-b border-slate-200 px-5 py-6">
+          <div className="text-lg font-bold text-slate-900">
+            Hi.PRIMA WMS
+          </div>
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={
-                  onNavigate
-                }
-                className={[
-                  "block rounded-xl px-4 py-3 text-sm transition",
-                  active
-                    ? "bg-slate-900 font-medium text-white"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                ].join(" ")}
-              >
-                {item.label}
-              </Link>
-            );
-          }
-        )}
-      </nav>
-    );
-  }
+          <div className="mt-1 text-xs text-slate-500">
+            PT Prima Berkah Mulia
+          </div>
+        </div>
 
-  function UserFooter() {
-    return (
-      <div className="mt-auto border-t border-slate-200 pt-5">
-        {profile && (
-          <div className="mb-4 rounded-xl bg-slate-50 p-4">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+          {navItems
+            .filter(
+              (item) => item.visible
+            )
+            .map((item) => {
+              const active =
+                activeMenu(item.href);
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() =>
+                    setMobileOpen(false)
+                  }
+                  className={
+                    active
+                      ? "block rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
+                      : "block rounded-xl px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  }
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+        </nav>
+
+        <div className="border-t border-slate-200 p-4">
+          <div className="mb-3 rounded-xl bg-slate-50 p-3">
             <div className="truncate text-sm font-semibold text-slate-900">
-              {profile.full_name ||
+              {profile?.full_name ||
                 "WMS User"}
             </div>
 
             <div className="mt-1 text-xs text-slate-500">
-              {formatRole(
-                profile.role
-              )}
+              {ROLE_LABELS[role] ||
+                role ||
+                "Loading..."}
             </div>
           </div>
-        )}
 
-        <button
-          type="button"
-          onClick={handleLogout}
-          disabled={loggingOut}
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loggingOut
-            ? "Logging out..."
-            : "Logout"}
-        </button>
-
-        <div className="mt-5 text-xs text-slate-400">
-          PT Prima Berkah Mulia
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Logout
+          </button>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
-      {/* DESKTOP SIDEBAR */}
-      <aside className="hidden w-[290px] shrink-0 border-r border-slate-200 bg-white lg:flex lg:min-h-screen lg:flex-col">
-        <div className="flex min-h-screen flex-col p-6">
-          <div>
-            <div className="text-xl font-bold text-slate-900">
-              Hi.PRIMA
-            </div>
-
-            <div className="mt-1 text-sm leading-5 text-slate-500">
-              Warehouse Management
-              <br />
-              System
-            </div>
-          </div>
-
-          <MenuLinks />
-
-          <UserFooter />
-        </div>
+      <aside className="hidden min-h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+        <MenuContent />
       </aside>
 
-      {/* MOBILE MENU BUTTON */}
       <button
         type="button"
+        aria-label="Open menu"
         onClick={() =>
           setMobileOpen(true)
         }
-        aria-label="Open menu"
-        className="fixed bottom-5 left-5 z-40 flex h-14 items-center gap-3 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white shadow-lg lg:hidden"
+        className="fixed bottom-5 left-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-xl text-white shadow-lg lg:hidden"
       >
-        <span className="text-xl leading-none">
-          ☰
-        </span>
-
-        <span>Menu</span>
+        ☰
       </button>
 
-      {/* MOBILE OVERLAY */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-[60] lg:hidden">
           <button
             type="button"
             aria-label="Close menu"
             onClick={() =>
               setMobileOpen(false)
             }
-            className="absolute inset-0 h-full w-full bg-slate-950/40"
+            className="absolute inset-0 bg-black/40"
           />
 
-          {/* MOBILE DRAWER */}
-          <aside className="relative z-10 flex h-full w-[290px] max-w-[85vw] flex-col overflow-y-auto bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-xl font-bold text-slate-900">
-                  Hi.PRIMA
-                </div>
-
-                <div className="mt-1 text-sm leading-5 text-slate-500">
-                  Warehouse Management
-                  <br />
-                  System
-                </div>
-              </div>
-
+          <aside className="relative z-10 flex h-full w-[min(82vw,300px)] flex-col bg-white shadow-2xl">
+            <div className="absolute right-3 top-3 z-20">
               <button
                 type="button"
-                onClick={() =>
-                  setMobileOpen(
-                    false
-                  )
-                }
                 aria-label="Close menu"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-2xl leading-none text-slate-500"
+                onClick={() =>
+                  setMobileOpen(false)
+                }
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg text-slate-600"
               >
                 ×
               </button>
             </div>
 
-            <MenuLinks
-              onNavigate={() =>
-                setMobileOpen(
-                  false
-                )
-              }
-            />
-
-            <UserFooter />
+            <MenuContent />
           </aside>
         </div>
       )}

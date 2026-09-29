@@ -370,7 +370,7 @@ export default function StockMovementPage() {
               ) : (
                 <>
                   <div className="hidden lg:block">
-                    <table className="w-full table-fixed text-left text-sm">
+                    <table className="w-full table-fixed text-left text-sm [&_th:nth-child(4)]:whitespace-nowrap [&_td:nth-child(4)]:whitespace-nowrap">
                       <colgroup>
                         <col className="w-[6%]" />
                         <col className="w-[12%]" />
@@ -535,7 +535,7 @@ export default function StockMovementPage() {
                                 }
                               </div>
 
-                              <div className="mt-1 break-all font-semibold">
+                              <div className="mt-1 break-words font-semibold lg:whitespace-nowrap">
                                 {movement.sku}
                               </div>
                             </div>

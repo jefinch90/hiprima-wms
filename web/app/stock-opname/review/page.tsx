@@ -1,0 +1,1688 @@
+"use client";
+
+import { appAlert, appConfirm } from "@/utils/appDialog";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import Sidebar from "@/components/Sidebar";
+import { createClient } from "@/utils/supabase/client";
+
+type SessionDetail = {
+  session_id: string;
+  session_code: string;
+  opname_type: string;
+  status: string;
+  notes: string | null;
+
+  total_locations: number;
+  completed_locations: number;
+
+  total_lines: number;
+  counted_lines: number;
+  variance_lines: number;
+
+  progress_percent: number;
+
+  created_by: string | null;
+  created_by_name: string | null;
+
+  created_at: string;
+  started_at: string | null;
+  submitted_at: string | null;
+
+  finalized_by: string | null;
+  finalized_at: string | null;
+
+  adjustment_lines: number;
+  qty_adjustment_in: number;
+  qty_adjustment_out: number;
+};
+
+type RackRow = {
+  location_id: string;
+  location_code: string;
+  location_name: string;
+
+  area_code: string;
+  area_name: string;
+
+  total_lines: number;
+  counted_lines: number;
+  variance_lines: number;
+
+  progress_percent: number;
+  is_complete: boolean;
+};
+
+type ReviewLine = {
+  line_id: string;
+
+  variant_id: string;
+
+  sku: string;
+  product_code: string;
+  product_name: string;
+
+  color: string | null;
+  size: string | null;
+
+  location_id: string;
+  location_code: string;
+  location_name: string;
+
+  area_code: string;
+  area_name: string;
+
+  system_qty: number;
+  counted_qty: number | null;
+  recount_qty: number | null;
+
+  final_count_qty: number | null;
+  variance: number | null;
+
+  counted_by: string | null;
+  counted_by_name: string | null;
+  counted_at: string | null;
+
+  recounted_by: string | null;
+  recounted_by_name: string | null;
+  recounted_at: string | null;
+
+  total_count: number;
+};
+
+type FinalizeResult = {
+  session_code: string;
+  adjustment_lines: number;
+  qty_adjustment_in: number;
+  qty_adjustment_out: number;
+};
+
+type RecountStatus = {
+  pending_recount_lines: number | string;
+  recounted_lines: number | string;
+  confirmed_variance_lines: number | string;
+};
+
+const RECOUNT_ROLES = [
+  "owner",
+  "admin",
+  "warehouse_manager",
+  "warehouse_staff",
+];
+
+const FINALIZE_ROLES = [
+  "owner",
+  "admin",
+  "warehouse_manager",
+];
+
+function formatNumber(
+  value: number | string | null | undefined
+) {
+  return Number(
+    value ?? 0
+  ).toLocaleString("id-ID");
+}
+
+function formatVariance(
+  value: number | null | undefined
+) {
+  const number = Number(
+    value ?? 0
+  );
+
+  if (number > 0) {
+    return `+${formatNumber(number)}`;
+  }
+
+  return formatNumber(number);
+}
+
+function typeLabel(value: string) {
+  return value === "cycle_count"
+    ? "Cycle Count"
+    : "Full Stock Opname";
+}
+
+function statusLabel(value: string) {
+  const labels: Record<
+    string,
+    string
+  > = {
+    draft: "Draft",
+    counting: "Counting",
+    review: "Review",
+    finalized: "Finalized",
+    cancelled: "Cancelled",
+  };
+
+  return labels[value] ?? value;
+}
+
+export default function StockOpnameReviewPage() {
+  const router = useRouter();
+
+  const supabase = useMemo(
+    () => createClient(),
+    []
+  );
+
+  const [sessionId, setSessionId] =
+    useState("");
+
+  const [role, setRole] =
+    useState("");
+
+  const [session, setSession] =
+    useState<SessionDetail | null>(
+      null
+    );
+
+  const [racks, setRacks] =
+    useState<RackRow[]>([]);
+
+  const [
+    activeRackId,
+    setActiveRackId,
+  ] = useState("");
+
+  const [rackSearch, setRackSearch] =
+    useState("");
+
+  const [lines, setLines] =
+    useState<ReviewLine[]>([]);
+
+  const [
+    lineSearch,
+    setLineSearch,
+  ] = useState("");
+
+  const [
+    recountDrafts,
+    setRecountDrafts,
+  ] = useState<
+    Record<string, string>
+  >({});
+
+  const [
+    savingLineId,
+    setSavingLineId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    lastSavedLineId,
+    setLastSavedLineId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [
+    loadingLines,
+    setLoadingLines,
+  ] = useState(false);
+
+  const [
+    finalizing,
+    setFinalizing,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  const [
+    reviewStatus,
+    setReviewStatus,
+  ] = useState<RecountStatus | null>(
+    null
+  );
+
+  const pendingRecountCount =
+    Number(
+      reviewStatus?.pending_recount_lines ??
+        0
+    );
+
+  const canRecount =
+    RECOUNT_ROLES.includes(role) &&
+    session?.status === "review";
+
+  const canFinalize =
+    FINALIZE_ROLES.includes(role) &&
+    session?.status === "review" &&
+    pendingRecountCount === 0;
+
+  const activeRack =
+    racks.find(
+      (item) =>
+        item.location_id ===
+        activeRackId
+    ) ?? null;
+
+  const filteredRacks =
+    useMemo(() => {
+      const keyword =
+        rackSearch
+          .trim()
+          .toLowerCase();
+
+      if (!keyword) {
+        return racks;
+      }
+
+      return racks.filter(
+        (item) =>
+          [
+            item.location_code,
+            item.location_name,
+            item.area_code,
+            item.area_name,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(keyword)
+      );
+    }, [racks, rackSearch]);
+
+  const loadSummary =
+    useCallback(
+      async (id: string) => {
+        const [
+          sessionResult,
+          racksResult,
+        ] = await Promise.all([
+          supabase.rpc(
+            "get_stock_opname_session_detail",
+            {
+              p_session_id: id,
+            }
+          ),
+
+          supabase.rpc(
+            "get_stock_opname_racks",
+            {
+              p_session_id: id,
+            }
+          ),
+        ]);
+
+        if (
+          sessionResult.error
+        ) {
+          throw sessionResult.error;
+        }
+
+        if (racksResult.error) {
+          throw racksResult.error;
+        }
+
+        const {
+          data: recountData,
+          error: recountError,
+        } = await supabase.rpc(
+          "get_stock_opname_recount_status",
+          {
+            p_session_id: id,
+          }
+        );
+
+        if (recountError) {
+          throw recountError;
+        }
+
+        const recountRow =
+          ((recountData ?? [])[0] as
+            | RecountStatus
+            | undefined) ??
+          null;
+
+        const sessionRow =
+          ((sessionResult.data ??
+            [])[0] as
+            | SessionDetail
+            | undefined) ??
+          null;
+
+        const rackRows =
+          (racksResult.data ??
+            []) as RackRow[];
+
+        setSession(sessionRow);
+        setRacks(rackRows);
+        setReviewStatus(
+          recountRow
+        );
+
+        return {
+          sessionRow,
+          rackRows,
+        };
+      },
+      [supabase]
+    );
+
+  const loadLines =
+    useCallback(
+      async (
+        id: string,
+        rackId: string,
+        search = ""
+      ) => {
+        setLoadingLines(true);
+        setErrorMessage("");
+
+        const { data, error } =
+          await supabase.rpc(
+            "get_stock_opname_lines_by_rack",
+            {
+              p_session_id: id,
+              p_location_id:
+                rackId,
+              p_search:
+                search.trim() ||
+                null,
+              p_limit: 500,
+              p_offset: 0,
+            }
+          );
+
+        if (error) {
+          setLines([]);
+          setRecountDrafts(
+            {}
+          );
+
+          setErrorMessage(
+            error.message
+          );
+
+          setLoadingLines(false);
+
+          return;
+        }
+
+        const rows =
+          (data ??
+            []) as ReviewLine[];
+
+        const drafts: Record<
+          string,
+          string
+        > = {};
+
+        for (const row of rows) {
+          drafts[row.line_id] =
+            row.recount_qty ===
+            null
+              ? ""
+              : String(
+                  row.recount_qty
+                );
+        }
+
+        setLines(rows);
+        setRecountDrafts(
+          drafts
+        );
+
+        setLoadingLines(false);
+      },
+      [supabase]
+    );
+
+  useEffect(() => {
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
+
+    const id =
+      params.get("session") ??
+      "";
+
+    if (!id) {
+      setErrorMessage(
+        "Session Stock Opname tidak ditemukan."
+      );
+
+      setLoading(false);
+
+      return;
+    }
+
+    setSessionId(id);
+
+    async function init() {
+      try {
+        const {
+          data: { user },
+        } =
+          await supabase.auth.getUser();
+
+        if (!user) {
+          router.replace(
+            "/login"
+          );
+
+          return;
+        }
+
+        const {
+          data: profile,
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .select(
+            "role, is_active"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .single();
+
+        if (
+          profileError ||
+          !profile ||
+          profile.is_active !==
+            true
+        ) {
+          await supabase.auth.signOut();
+
+          router.replace(
+            "/login"
+          );
+
+          return;
+        }
+
+        setRole(
+          profile.role
+        );
+
+        const {
+          sessionRow,
+          rackRows,
+        } =
+          await loadSummary(
+            id
+          );
+
+        if (
+          !sessionRow
+        ) {
+          throw new Error(
+            "Session Stock Opname tidak ditemukan."
+          );
+        }
+
+        if (
+          sessionRow.status ===
+            "draft" ||
+          sessionRow.status ===
+            "counting"
+        ) {
+          router.replace(
+            `/stock-opname/counting?session=${encodeURIComponent(
+              id
+            )}`
+          );
+
+          return;
+        }
+
+        const firstRack =
+          rackRows.find(
+            (item) =>
+              Number(
+                item.variance_lines
+              ) > 0
+          ) ??
+          rackRows[0] ??
+          null;
+
+        if (firstRack) {
+          setActiveRackId(
+            firstRack.location_id
+          );
+
+          await loadLines(
+            id,
+            firstRack.location_id
+          );
+        }
+
+        setLoading(false);
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Gagal membuka Review Stock Opname."
+        );
+
+        setLoading(false);
+      }
+    }
+
+    init();
+  }, [
+    loadLines,
+    loadSummary,
+    router,
+    supabase,
+  ]);
+
+  async function selectRack(
+    rackId: string
+  ) {
+    if (!sessionId) {
+      return;
+    }
+
+    setActiveRackId(
+      rackId
+    );
+
+    setLineSearch("");
+
+    await loadLines(
+      sessionId,
+      rackId
+    );
+  }
+
+  async function handleSearch(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (
+      !sessionId ||
+      !activeRackId
+    ) {
+      return;
+    }
+
+    await loadLines(
+      sessionId,
+      activeRackId,
+      lineSearch
+    );
+  }
+
+  async function resetSearch() {
+    setLineSearch("");
+
+    if (
+      sessionId &&
+      activeRackId
+    ) {
+      await loadLines(
+        sessionId,
+        activeRackId
+      );
+    }
+  }
+
+  async function saveRecount(
+    line: ReviewLine
+  ) {
+    if (
+      !canRecount ||
+      savingLineId
+    ) {
+      return;
+    }
+
+    const raw =
+      recountDrafts[
+        line.line_id
+      ] ?? "";
+
+    if (
+      raw.trim() === ""
+    ) {
+      return;
+    }
+
+    const qty =
+      Number(raw);
+
+    if (
+      !Number.isInteger(
+        qty
+      ) ||
+      qty < 0
+    ) {
+      setErrorMessage(
+        `Recount ${line.sku} harus angka bulat 0 atau lebih.`
+      );
+
+      return;
+    }
+
+    if (
+      line.recount_qty !==
+        null &&
+      Number(
+        line.recount_qty
+      ) === qty
+    ) {
+      return;
+    }
+
+    setSavingLineId(
+      line.line_id
+    );
+
+    setErrorMessage("");
+
+    const { error } =
+      await supabase.rpc(
+        "save_stock_opname_recount",
+        {
+          p_session_id:
+            sessionId,
+
+          p_variant_id:
+            line.variant_id,
+
+          p_location_id:
+            line.location_id,
+
+          p_recount_qty:
+            qty,
+        }
+      );
+
+    if (error) {
+      setErrorMessage(
+        error.message
+      );
+
+      setSavingLineId(
+        null
+      );
+
+      return;
+    }
+
+    try {
+      await loadSummary(
+        sessionId
+      );
+
+      await loadLines(
+        sessionId,
+        line.location_id,
+        lineSearch
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Recount tersimpan, tetapi refresh gagal."
+      );
+    }
+
+    setSavingLineId(
+      null
+    );
+
+    setLastSavedLineId(
+      line.line_id
+    );
+
+    window.setTimeout(
+      () => {
+        setLastSavedLineId(
+          (current) =>
+            current ===
+            line.line_id
+              ? null
+              : current
+        );
+      },
+      1200
+    );
+  }
+
+  async function handleFinalize() {
+    if (
+      !session ||
+      !sessionId ||
+      !canFinalize
+    ) {
+      return;
+    }
+
+    const varianceLines =
+      Number(
+        session.variance_lines ??
+          0
+      );
+
+    const confirmed =
+      await appConfirm(
+        [
+          "Finalize Stock Opname?",
+          "",
+          `Session: ${session.session_code}`,
+          `SKU: ${formatNumber(
+            session.total_lines
+          )}`,
+          `SKU selisih: ${formatNumber(
+            varianceLines
+          )}`,
+          "",
+          varianceLines === 0
+            ? "Tidak ada perubahan qty inventory."
+            : "Selisih akan diposting sebagai Adjustment In / Out.",
+          "",
+          "Setelah Finalize, session tidak dapat diedit lagi.",
+        ].join("\n")
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setFinalizing(true);
+    setErrorMessage("");
+
+    const { data, error } =
+      await supabase.rpc(
+        "finalize_stock_opname_checked",
+        {
+          p_session_id:
+            sessionId,
+        }
+      );
+
+    if (error) {
+      setErrorMessage(
+        error.message
+      );
+
+      setFinalizing(false);
+
+      return;
+    }
+
+    const result =
+      ((data ?? [])[0] as
+        | FinalizeResult
+        | undefined) ??
+      null;
+
+    try {
+      await loadSummary(
+        sessionId
+      );
+
+      if (activeRackId) {
+        await loadLines(
+          sessionId,
+          activeRackId
+        );
+      }
+    } catch {
+      // Finalize already succeeded.
+    }
+
+    setFinalizing(false);
+
+    await appAlert(
+      [
+        "Stock Opname Finalized",
+        "",
+        `Session: ${
+          result?.session_code ??
+          session.session_code
+        }`,
+        `Adjustment lines: ${formatNumber(
+          result?.adjustment_lines ??
+            0
+        )}`,
+        `Adjustment IN: +${formatNumber(
+          result?.qty_adjustment_in ??
+            0
+        )}`,
+        `Adjustment OUT: -${formatNumber(
+          result?.qty_adjustment_out ??
+            0
+        )}`,
+      ].join("\n")
+    );
+  }
+
+  const sessionVariance =
+    Number(
+      session?.variance_lines ??
+        0
+    );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="flex min-h-screen">
+          <Sidebar />
+
+          <main className="flex-1 p-6 md:p-10">
+            <div className="mx-auto max-w-[1500px] rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+              Loading Review...
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
+      <div className="flex min-h-screen w-full max-w-full">
+        <Sidebar />
+
+        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 lg:h-dvh lg:overflow-hidden lg:p-6 lg:pb-6">
+          <div className="mx-auto flex w-full min-w-0 max-w-[1500px] flex-col lg:h-full">
+            <header className="mb-4 shrink-0">
+              <p className="text-sm text-slate-500">
+                Stock Opname
+              </p>
+
+              <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-2xl font-bold sm:text-3xl">
+                      {session?.session_code ??
+                        "Review"}
+                    </h1>
+
+                    {session && (
+                      <span className="rounded-lg bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                        {statusLabel(
+                          session.status
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  {session && (
+                    <p className="mt-2 text-sm text-slate-500">
+                      {typeLabel(
+                        session.opname_type
+                      )}
+                      {" • "}
+                      {formatNumber(
+                        session.total_lines
+                      )}{" "}
+                      SKU
+                    </p>
+                  )}
+                </div>
+
+                <Link
+                  href="/stock-opname"
+                  className="shrink-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
+                >
+                  Back
+                </Link>
+              </div>
+            </header>
+
+            {errorMessage && (
+              <div className="mb-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {errorMessage}
+              </div>
+            )}
+
+            {session?.status ===
+              "finalized" && (
+              <div className="mb-4 shrink-0 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="font-semibold text-emerald-900">
+                  Stock Opname sudah Finalized ✓
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-4 text-sm text-emerald-800">
+                  <span>
+                    Adjustment Lines:{" "}
+                    <b>
+                      {formatNumber(
+                        session.adjustment_lines
+                      )}
+                    </b>
+                  </span>
+
+                  <span>
+                    IN:{" "}
+                    <b>
+                      +
+                      {formatNumber(
+                        session.qty_adjustment_in
+                      )}
+                    </b>
+                  </span>
+
+                  <span>
+                    OUT:{" "}
+                    <b>
+                      -
+                      {formatNumber(
+                        session.qty_adjustment_out
+                      )}
+                    </b>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {session?.status ===
+              "review" && (
+              <div
+                className={
+                  pendingRecountCount > 0 ||
+                  sessionVariance > 0
+                    ? "mb-4 shrink-0 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+                    : "mb-4 shrink-0 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
+                }
+              >
+                <div
+                  className={
+                    pendingRecountCount > 0 ||
+                    sessionVariance > 0
+                      ? "font-semibold text-amber-900"
+                      : "font-semibold text-emerald-900"
+                  }
+                >
+                  {pendingRecountCount > 0
+                    ? `${formatNumber(
+                        pendingRecountCount
+                      )} SKU wajib Recount`
+                    : sessionVariance === 0
+                      ? "Semua stok cocok ✓"
+                      : `${formatNumber(
+                          sessionVariance
+                        )} SKU selisih sudah dikonfirmasi`}
+                </div>
+
+                <p
+                  className={
+                    pendingRecountCount > 0 ||
+                    sessionVariance > 0
+                      ? "mt-1 text-sm text-amber-700"
+                      : "mt-1 text-sm text-emerald-700"
+                  }
+                >
+                  {pendingRecountCount > 0
+                    ? "Finalize dikunci sampai seluruh SKU yang selisih selesai Recount."
+                    : sessionVariance === 0
+                      ? "Tidak ada koreksi inventory yang diperlukan."
+                      : "Recount sudah selesai. Selisih ini akan diposting saat Finalize."}
+                </p>
+              </div>
+            )}
+
+            <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+              <section className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 p-4">
+                  <div className="font-semibold">
+                    Rack
+                  </div>
+
+                  <input
+                    value={
+                      rackSearch
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setRackSearch(
+                        event.target
+                          .value
+                      )
+                    }
+                    placeholder="Cari rack..."
+                    className="mt-3 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  />
+                </div>
+
+                <div className="hidden h-[calc(100%-85px)] overflow-y-auto lg:block">
+                  {filteredRacks.map(
+                    (rack) => {
+                      const active =
+                        rack.location_id ===
+                        activeRackId;
+
+                      return (
+                        <button
+                          key={
+                            rack.location_id
+                          }
+                          type="button"
+                          onClick={() =>
+                            selectRack(
+                              rack.location_id
+                            )
+                          }
+                          className={
+                            active
+                              ? "flex w-full items-center justify-between gap-3 border-b border-slate-100 bg-slate-900 p-4 text-left text-white"
+                              : "flex w-full items-center justify-between gap-3 border-b border-slate-100 p-4 text-left hover:bg-slate-50"
+                          }
+                        >
+                          <div className="min-w-0">
+                            <div className="font-semibold">
+                              {
+                                rack.location_code
+                              }
+                            </div>
+
+                            <div
+                              className={
+                                active
+                                  ? "mt-1 truncate text-xs text-slate-300"
+                                  : "mt-1 truncate text-xs text-slate-500"
+                              }
+                            >
+                              {
+                                rack.area_name
+                              }
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            {Number(
+                              rack.variance_lines
+                            ) === 0 ? (
+                              <span className="text-xs font-semibold">
+                                ✓ Match
+                              </span>
+                            ) : (
+                              <span
+                                className={
+                                  active
+                                    ? "text-xs font-semibold text-amber-300"
+                                    : "text-xs font-semibold text-amber-600"
+                                }
+                              >
+                                {formatNumber(
+                                  rack.variance_lines
+                                )}{" "}
+                                selisih
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+
+                <div className="p-4 lg:hidden">
+                  <select
+                    value={
+                      activeRackId
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      selectRack(
+                        event.target
+                          .value
+                      )
+                    }
+                    className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
+                  >
+                    {filteredRacks.map(
+                      (rack) => (
+                        <option
+                          key={
+                            rack.location_id
+                          }
+                          value={
+                            rack.location_id
+                          }
+                        >
+                          {
+                            rack.location_code
+                          }{" "}
+                          —{" "}
+                          {Number(
+                            rack.variance_lines
+                          ) === 0
+                            ? "Match"
+                            : `${rack.variance_lines} selisih`}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+              </section>
+
+              <section className="min-h-0 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex lg:flex-col">
+                {!activeRack ? (
+                  <div className="p-10 text-center text-sm text-slate-500">
+                    Pilih rack.
+                  </div>
+                ) : (
+                  <>
+                    <div className="shrink-0 border-b border-slate-200 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Rack Review
+                          </div>
+
+                          <h2 className="mt-1 text-xl font-bold">
+                            {
+                              activeRack.location_code
+                            }
+                          </h2>
+
+                          <p className="mt-1 text-sm text-slate-500">
+                            {
+                              activeRack.area_name
+                            }
+                            {" • "}
+                            {formatNumber(
+                              activeRack.variance_lines
+                            )}{" "}
+                            SKU selisih
+                          </p>
+                        </div>
+
+                        <form
+                          onSubmit={
+                            handleSearch
+                          }
+                          className="flex min-w-0 gap-2 sm:w-[430px]"
+                        >
+                          <input
+                            value={
+                              lineSearch
+                            }
+                            onChange={(
+                              event
+                            ) =>
+                              setLineSearch(
+                                event
+                                  .target
+                                  .value
+                              )
+                            }
+                            placeholder="Cari SKU..."
+                            className="h-10 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 text-sm"
+                          />
+
+                          <button
+                            type="submit"
+                            className="shrink-0 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white"
+                          >
+                            Search
+                          </button>
+
+                          {lineSearch && (
+                            <button
+                              type="button"
+                              onClick={
+                                resetSearch
+                              }
+                              className="shrink-0 rounded-xl border border-slate-300 px-3 text-sm"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </form>
+                      </div>
+                    </div>
+
+                    {loadingLines ? (
+                      <div className="p-10 text-center text-sm text-slate-500">
+                        Loading Review...
+                      </div>
+                    ) : lines.length ===
+                      0 ? (
+                      <div className="p-10 text-center text-sm text-slate-500">
+                        Tidak ada SKU.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden md:block">
+                          <table className="w-full table-fixed text-left text-sm">
+                            <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
+                              <tr>
+                                <th className="w-[19%] whitespace-nowrap px-4 py-4 align-middle">
+                                  SKU
+                                </th>
+
+                                <th className="w-[29%] whitespace-nowrap px-4 py-4 align-middle">
+                                  Produk
+                                </th>
+
+                                <th className="w-[11%] whitespace-nowrap px-3 py-4 text-center align-middle">
+                                  System
+                                </th>
+
+                                <th className="w-[13%] whitespace-nowrap px-3 py-4 text-center align-middle">
+                                  Fisik Final
+                                </th>
+
+                                <th className="w-[12%] whitespace-nowrap px-3 py-4 text-center align-middle">
+                                  Selisih
+                                </th>
+
+                                <th className="w-[16%] whitespace-nowrap px-4 py-4 text-center align-middle">
+                                  Recount
+                                </th>
+                              </tr>
+                            </thead>
+
+                            <tbody className="divide-y divide-slate-100">
+                              {lines.map(
+                                (
+                                  line
+                                ) => {
+                                  const variance =
+                                    Number(
+                                      line.variance ??
+                                        0
+                                    );
+
+                                  return (
+                                    <tr
+                                      key={
+                                        line.line_id
+                                      }
+                                      className={
+                                        variance ===
+                                        0
+                                          ? ""
+                                          : "bg-amber-50/50"
+                                      }
+                                    >
+                                      <td className="whitespace-nowrap px-4 py-4 align-top font-semibold">
+                                        {
+                                          line.sku
+                                        }
+                                      </td>
+
+                                      <td className="min-w-0 px-4 py-4 align-top">
+                                        <div className="break-words font-medium">
+                                          {
+                                            line.product_name
+                                          }
+                                        </div>
+
+                                        <div className="mt-1 break-words text-xs text-slate-500">
+                                          {[
+                                            line.color,
+                                            line.size,
+                                          ]
+                                            .filter(
+                                              Boolean
+                                            )
+                                            .join(
+                                              " / "
+                                            ) ||
+                                            "-"}
+                                        </div>
+                                      </td>
+
+                                      <td className="px-3 py-4 text-center align-top font-semibold">
+                                        {formatNumber(
+                                          line.system_qty
+                                        )}
+                                      </td>
+
+                                      <td className="px-3 py-4 text-center align-top">
+                                        <div className="font-semibold">
+                                          {formatNumber(
+                                            line.final_count_qty
+                                          )}
+                                        </div>
+
+                                        {line.recount_qty !==
+                                          null && (
+                                          <div className="mt-1 whitespace-nowrap text-[11px] text-slate-400">
+                                            1st:{" "}
+                                            {formatNumber(
+                                              line.counted_qty
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
+
+                                      <td className="px-3 py-4 text-center align-top">
+                                        <span
+                                          className={
+                                            variance ===
+                                            0
+                                              ? "font-bold text-emerald-600"
+                                              : variance >
+                                                  0
+                                                ? "font-bold text-blue-600"
+                                                : "font-bold text-red-600"
+                                          }
+                                        >
+                                          {variance ===
+                                          0
+                                            ? "✓ 0"
+                                            : formatVariance(
+                                                variance
+                                              )}
+                                        </span>
+                                      </td>
+
+                                      <td className="px-4 py-4 text-center align-top">
+                                        {variance === 0 ? (
+                                          <span className="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-50 px-3 text-xs font-semibold leading-none text-emerald-700">
+                                            Match ✓
+                                          </span>
+                                        ) : canRecount ? (
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="1"
+                                              inputMode="numeric"
+                                              value={
+                                                recountDrafts[
+                                                  line.line_id
+                                                ] ?? ""
+                                              }
+                                              onChange={(event) =>
+                                                setRecountDrafts(
+                                                  (current) => ({
+                                                    ...current,
+                                                    [line.line_id]:
+                                                      event.target.value,
+                                                  })
+                                                )
+                                              }
+                                              onBlur={() =>
+                                                saveRecount(line)
+                                              }
+                                              onKeyDown={(event) => {
+                                                if (
+                                                  event.key === "Enter"
+                                                ) {
+                                                  event.preventDefault();
+                                                  event.currentTarget.blur();
+                                                }
+                                              }}
+                                              placeholder="Recount"
+                                              className="h-10 w-full min-w-0 max-w-28 rounded-xl border border-amber-300 bg-white px-3 text-right font-bold outline-none focus:border-amber-500"
+                                            />
+
+                                            <span className="shrink-0 text-xs">
+                                              {savingLineId ===
+                                              line.line_id ? (
+                                                "Saving"
+                                              ) : lastSavedLineId ===
+                                                line.line_id ? (
+                                                <span className="font-semibold text-emerald-600">
+                                                  ✓
+                                                </span>
+                                              ) : line.recount_qty !==
+                                                null ? (
+                                                <span className="font-semibold text-emerald-600">
+                                                  ✓
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                          </div>
+                                        ) : line.recount_qty !== null ? (
+                                          <span className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+                                            {formatNumber(
+                                              line.recount_qty
+                                            )} ✓
+                                          </span>
+                                        ) : (
+                                          <span className="text-xs text-slate-400">
+                                            -
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 md:hidden">
+                          {lines.map(
+                            (
+                              line
+                            ) => {
+                              const variance =
+                                Number(
+                                  line.variance ??
+                                    0
+                                );
+
+                              return (
+                                <div
+                                  key={
+                                    line.line_id
+                                  }
+                                  className={
+                                    variance ===
+                                    0
+                                      ? "rounded-xl border border-slate-200 p-4"
+                                      : "rounded-xl border border-amber-200 bg-amber-50 p-4"
+                                  }
+                                >
+                                  <div className="font-semibold">
+                                    {
+                                      line.sku
+                                    }
+                                  </div>
+
+                                  <div className="mt-1 text-sm">
+                                    {
+                                      line.product_name
+                                    }
+                                  </div>
+
+                                  <div className="mt-4 grid grid-cols-3 gap-2">
+                                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                                      <div className="text-xs text-slate-500">
+                                        System
+                                      </div>
+
+                                      <div className="mt-1 font-bold">
+                                        {formatNumber(
+                                          line.system_qty
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                                      <div className="text-xs text-slate-500">
+                                        Fisik Final
+                                      </div>
+
+                                      <div className="mt-1 font-bold">
+                                        {formatNumber(
+                                          line.final_count_qty
+                                        )}
+                                      </div>
+
+                                      {line.recount_qty !==
+                                        null && (
+                                        <div className="mt-1 text-[10px] text-slate-400">
+                                          1st:{" "}
+                                          {formatNumber(
+                                            line.counted_qty
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                                      <div className="text-xs text-slate-500">
+                                        Selisih
+                                      </div>
+
+                                      <div
+                                        className={
+                                          variance ===
+                                          0
+                                            ? "mt-1 font-bold text-emerald-600"
+                                            : "mt-1 font-bold text-red-600"
+                                        }
+                                      >
+                                        {variance ===
+                                        0
+                                          ? "✓ 0"
+                                          : formatVariance(
+                                              variance
+                                            )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {variance !==
+                                    0 &&
+                                    canRecount && (
+                                      <div className="mt-4">
+                                        <label className="mb-2 block text-xs font-semibold text-slate-500">
+                                          Recount
+                                        </label>
+
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="1"
+                                          inputMode="numeric"
+                                          value={
+                                            recountDrafts[
+                                              line
+                                                .line_id
+                                            ] ??
+                                            ""
+                                          }
+                                          onChange={(
+                                            event
+                                          ) =>
+                                            setRecountDrafts(
+                                              (
+                                                current
+                                              ) => ({
+                                                ...current,
+                                                [line.line_id]:
+                                                  event
+                                                    .target
+                                                    .value,
+                                              })
+                                            )
+                                          }
+                                          onBlur={() =>
+                                            saveRecount(
+                                              line
+                                            )
+                                          }
+                                          className="h-12 w-32 rounded-xl border border-amber-300 bg-white px-3 text-right text-lg font-bold"
+                                        />
+                                      </div>
+                                    )}
+                                </div>
+                              );
+                            }
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </section>
+            </div>
+
+            {session && (
+              <div className="sticky bottom-3 z-20 mt-4 shrink-0 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur lg:static">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {session.status ===
+                      "finalized"
+                        ? "Stock Opname selesai ✓"
+                        : pendingRecountCount > 0
+                          ? `${formatNumber(
+                              pendingRecountCount
+                            )} SKU wajib Recount`
+                          : sessionVariance ===
+                              0
+                            ? "0 SKU selisih • Siap Finalize"
+                            : `${formatNumber(
+                                sessionVariance
+                              )} SKU selisih terkonfirmasi • Siap Finalize`}
+                    </div>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      {session.status ===
+                      "finalized"
+                        ? "Session sudah terkunci."
+                        : pendingRecountCount > 0
+                          ? "Selesaikan Recount terlebih dahulu. Finalize masih dikunci."
+                          : "Finalize akan mengunci session dan memposting Adjustment hanya jika ada selisih."}
+                    </p>
+                  </div>
+
+                  {session.status ===
+                    "review" && (
+                    <>
+                      {FINALIZE_ROLES.includes(
+                        role
+                      ) ? (
+                        <button
+                          type="button"
+                          onClick={
+                            handleFinalize
+                          }
+                          disabled={
+                            !canFinalize ||
+                            finalizing ||
+                            savingLineId !==
+                              null
+                          }
+                          className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {pendingRecountCount >
+                          0
+                            ? "Selesaikan Recount"
+                            : finalizing
+                              ? "Finalizing..."
+                              : "Finalize Stock Opname"}
+                        </button>
+                      ) : (
+                        <div className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-medium text-slate-500">
+                          Menunggu Manager / Admin / Owner untuk Finalize
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
