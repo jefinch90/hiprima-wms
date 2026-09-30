@@ -38,6 +38,14 @@ export default function LoginPage() {
     router.refresh();
   }
 
+  const inputClass =
+    "w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 caret-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-900";
+
+  const inputStyle = {
+    WebkitTextFillColor: "#0f172a",
+    caretColor: "#0f172a",
+  };
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -72,7 +80,8 @@ export default function LoginPage() {
               onChange={(e) =>
                 setEmail(e.target.value)
               }
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+              className={inputClass}
+              style={inputStyle}
               placeholder="email@company.com"
             />
           </div>
@@ -99,7 +108,8 @@ export default function LoginPage() {
               onChange={(e) =>
                 setPassword(e.target.value)
               }
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+              className={inputClass}
+              style={inputStyle}
               placeholder="••••••••"
             />
           </div>
