@@ -65,6 +65,13 @@ function formatDate(value: string) {
   });
 }
 
+function sessionHref(session: StockOpnameSession) {
+  const page = ["draft", "counting"].includes(session.status)
+    ? "counting"
+    : "review";
+  return `/stock-opname/${page}/?session=${session.session_id}`;
+}
+
 export default function StockOpnamePage() {
   const router = useRouter();
 
@@ -152,10 +159,16 @@ export default function StockOpnamePage() {
   );
 
   useEffect(() => {
-    loadData();
+    void Promise.resolve().then(loadData);
   }, [loadData]);
 
   const canCreate =
+    role === "owner" ||
+    role === "admin" ||
+    role === "warehouse_manager" ||
+    role === "warehouse_staff";
+
+  const canCreateFull =
     role === "owner" ||
     role === "admin" ||
     role === "warehouse_manager";
@@ -239,7 +252,7 @@ export default function StockOpnamePage() {
                   sekitar setiap 6 bulan.
                 </div>
 
-                {canCreate && (
+                {canCreateFull && (
                   <Link
                     href="/stock-opname/full"
                     className="mt-5 inline-flex rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
@@ -255,10 +268,8 @@ export default function StockOpnamePage() {
                 <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
                   Role Anda dapat melihat
                   sesi Stock Opname.
-                  Warehouse Staff akan dapat
-                  melakukan counting pada
-                  sesi yang dibuat Manager /
-                  Admin / Owner.
+                  Viewer hanya dapat membaca
+                  sesi dan hasil Stock Opname.
                 </div>
               )}
 
@@ -309,8 +320,57 @@ export default function StockOpnamePage() {
                   </div>
                 </div>
               ) : (
-                <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[1050px] text-left text-sm">
+                <div>
+                  <div className="divide-y divide-slate-100 xl:hidden">
+                    {sessions.map((item) => (
+                      <article key={item.session_id} className="space-y-3 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Link
+                            href={sessionHref(item)}
+                            className="break-all font-semibold text-indigo-700 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600"
+                          >
+                            {item.session_code}
+                          </Link>
+                          <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold">
+                            {STATUS_LABELS[item.status] || item.status}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {item.opname_type === "cycle_count" ? "Cycle Count" : "Full Opname"}
+                          {" · "}{formatNumber(item.total_locations)} rack
+                        </p>
+                        <dl className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <dt className="text-xs text-slate-500">Progress</dt>
+                            <dd>{formatNumber(item.counted_lines)} / {formatNumber(item.total_lines)} ({item.progress_percent}%)</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-slate-500">Variance</dt>
+                            <dd>{formatNumber(item.variance_lines)}</dd>
+                          </div>
+                          <div className="min-w-0">
+                            <dt className="text-xs text-slate-500">Created By</dt>
+                            <dd className="break-words">{item.created_by_name || "-"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-slate-500">Created</dt>
+                            <dd>{formatDate(item.created_at)}</dd>
+                          </div>
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                  <table className="hidden w-full table-fixed break-words text-left text-sm xl:table [&_th]:px-2 [&_td]:px-2">
+                    <colgroup>
+                      <col className="w-[20%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[11%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[18%]" />
+                    </colgroup>
                     <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-5 py-4">
@@ -350,9 +410,12 @@ export default function StockOpnamePage() {
                             className="hover:bg-slate-50"
                           >
                             <td className="px-5 py-4 font-semibold">
-                              {
-                                item.session_code
-                              }
+                              <Link
+                                href={sessionHref(item)}
+                                className="text-indigo-700 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600"
+                              >
+                                {item.session_code}
+                              </Link>
                             </td>
 
                             <td className="px-5 py-4">
@@ -363,7 +426,7 @@ export default function StockOpnamePage() {
                             </td>
 
                             <td className="px-5 py-4">
-                              <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold">
+                              <span className="inline-block max-w-full rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold">
                                 {STATUS_LABELS[
                                   item.status
                                 ] ||
@@ -403,7 +466,7 @@ export default function StockOpnamePage() {
                                 "-"}
                             </td>
 
-                            <td className="whitespace-nowrap px-5 py-4 text-slate-500">
+                            <td className="px-5 py-4 text-slate-500">
                               {formatDate(
                                 item.created_at
                               )}

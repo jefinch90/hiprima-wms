@@ -5,6 +5,7 @@ import { appAlert, appConfirm } from "@/utils/appDialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Fragment,
   FormEvent,
   KeyboardEvent,
   useCallback,
@@ -14,6 +15,7 @@ import {
 } from "react";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
+import CycleCountVarianceEditor from "@/components/stock-opname/CycleCountVarianceEditor";
 
 type SessionDetail = {
   session_id: string;
@@ -77,6 +79,13 @@ type CountLine = {
   recounted_by_name: string | null;
   recounted_at: string | null;
   total_count: number;
+  variance_reason_category?: string | null;
+  investigation_notes?: string | null;
+};
+
+type VarianceStatus = {
+  pending_recount_lines: number;
+  pending_reason_lines: number;
 };
 
 type SearchSkuRow = {
@@ -174,6 +183,9 @@ export default function StockOpnameCountingPage() {
   const [errorMessage, setErrorMessage] =
     useState("");
 
+  const [varianceStatus, setVarianceStatus] =
+    useState<VarianceStatus | null>(null);
+
   const [showAddSku, setShowAddSku] =
     useState(false);
 
@@ -192,9 +204,12 @@ export default function StockOpnameCountingPage() {
   const canCount =
     EDIT_ROLES.includes(role) &&
     !!session &&
+    (session.opname_type === "cycle_count" || role !== "warehouse_staff") &&
     ["draft", "counting"].includes(
       session.status
     );
+
+  const isCycleCount = session?.opname_type === "cycle_count";
 
   const activeRack =
     racks.find(
@@ -263,6 +278,16 @@ export default function StockOpnameCountingPage() {
         (racksResult.data ??
           []) as RackRow[];
 
+      if (sessionRow?.opname_type === "cycle_count") {
+        const { data: statusData, error: statusError } = await supabase.rpc(
+          "get_cycle_count_variance_status", { p_session_id: id }
+        );
+        if (statusError) throw statusError;
+        setVarianceStatus((statusData ?? [])[0] as VarianceStatus ?? null);
+      } else {
+        setVarianceStatus(null);
+      }
+
       setSession(sessionRow);
       setRacks(rackRows);
 
@@ -308,8 +333,21 @@ export default function StockOpnameCountingPage() {
         return;
       }
 
-      const rows =
-        (data ?? []) as CountLine[];
+      let rows = (data ?? []) as CountLine[];
+      if (rows.length > 0) {
+        const { data: reasonData, error: reasonError } = await supabase.rpc(
+          "get_cycle_count_line_reasons", { p_line_ids: rows.map((row) => row.line_id) }
+        );
+        if (reasonError) {
+          setErrorMessage(reasonError.message);
+          setLoadingLines(false);
+          return;
+        }
+        const reasons = new Map(
+          ((reasonData ?? []) as CountLine[]).map((row) => [row.line_id, row])
+        );
+        rows = rows.map((row) => ({ ...row, ...reasons.get(row.line_id) }));
+      }
 
       const nextDrafts:
         Record<string, string> = {};
@@ -339,17 +377,13 @@ export default function StockOpnameCountingPage() {
     const id =
       params.get("session") ?? "";
 
-    if (!id) {
-      setErrorMessage(
-        "Session Stock Opname tidak ditemukan."
-      );
-      setLoading(false);
-      return;
-    }
-
-    setSessionId(id);
-
     async function init() {
+      if (!id) {
+        setErrorMessage("Session Stock Opname tidak ditemukan.");
+        setLoading(false);
+        return;
+      }
+      setSessionId(id);
       try {
         const {
           data: { user },
@@ -433,7 +467,7 @@ export default function StockOpnameCountingPage() {
       }
     }
 
-    init();
+    void Promise.resolve().then(init);
   }, [
     loadLines,
     loadSummary,
@@ -538,6 +572,9 @@ export default function StockOpnameCountingPage() {
           ? {
               ...item,
               counted_qty: qty,
+              recount_qty: null,
+              variance_reason_category: null,
+              investigation_notes: null,
             }
           : item
       )
@@ -623,6 +660,13 @@ export default function StockOpnameCountingPage() {
     setLastSavedLineId(
       line.line_id
     );
+
+    if (session?.opname_type === "cycle_count") {
+      const { data: statusData } = await supabase.rpc(
+        "get_cycle_count_variance_status", { p_session_id: sessionId }
+      );
+      setVarianceStatus((statusData ?? [])[0] as VarianceStatus ?? null);
+    }
 
     setSavingLineId(null);
 
@@ -821,7 +865,8 @@ export default function StockOpnameCountingPage() {
   async function submitForReview() {
     if (
       !session ||
-      !sessionId
+      !sessionId ||
+      !canCount
     ) {
       return;
     }
@@ -838,6 +883,13 @@ export default function StockOpnameCountingPage() {
         "Masih ada SKU yang belum dihitung."
       );
 
+      return;
+    }
+
+    if (session.opname_type === "cycle_count" &&
+      (Number(varianceStatus?.pending_recount_lines ?? 0) > 0 ||
+       Number(varianceStatus?.pending_reason_lines ?? 0) > 0)) {
+      setErrorMessage("Selesaikan Recount dan Alasan Selisih sebelum kirim ke Review.");
       return;
     }
 
@@ -931,6 +983,17 @@ export default function StockOpnameCountingPage() {
       Number(
         session.total_lines
       );
+
+  const cycleInvestigationComplete =
+    session?.opname_type !== "cycle_count" ||
+    (varianceStatus !== null &&
+      Number(varianceStatus.pending_recount_lines) === 0 &&
+      Number(varianceStatus.pending_reason_lines) === 0);
+
+  async function refreshInvestigation(locationId: string) {
+    await loadSummary(sessionId);
+    await loadLines(sessionId, locationId, lineSearch);
+  }
 
   if (loading) {
     return (
@@ -1408,23 +1471,27 @@ export default function StockOpnameCountingPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="hidden max-h-[53vh] overflow-auto md:block">
-                          <table className="w-full min-w-[760px] text-left text-sm">
+                        <div className={isCycleCount
+                          ? "hidden max-h-[53vh] overflow-y-auto overflow-x-hidden md:block"
+                          : "hidden max-h-[53vh] overflow-auto md:block"}>
+                          <table className={isCycleCount
+                            ? "w-full table-fixed text-left text-sm"
+                            : "w-full min-w-[760px] text-left text-sm"}>
                             <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
                               <tr>
-                                <th className="px-5 py-4">
+                                <th className={isCycleCount ? "w-[19%] px-3 py-4" : "px-5 py-4"}>
                                   SKU
                                 </th>
 
-                                <th className="px-5 py-4">
+                                <th className={isCycleCount ? "w-[38%] px-3 py-4" : "px-5 py-4"}>
                                   Produk
                                 </th>
 
-                                <th className="px-5 py-4">
+                                <th className={isCycleCount ? "w-[22%] px-3 py-4" : "px-5 py-4"}>
                                   Variant
                                 </th>
 
-                                <th className="w-44 px-5 py-4 text-center">
+                                <th className={isCycleCount ? "w-[21%] px-3 py-4 text-center" : "w-44 px-5 py-4 text-center"}>
                                   Fisik
                                 </th>
                               </tr>
@@ -1435,18 +1502,16 @@ export default function StockOpnameCountingPage() {
                                 (
                                   line
                                 ) => (
+                                  <Fragment key={line.line_id}>
                                   <tr
-                                    key={
-                                      line.line_id
-                                    }
                                   >
-                                    <td className="px-5 py-4 font-semibold">
+                                    <td className={isCycleCount ? "break-all px-3 py-4 font-semibold" : "px-5 py-4 font-semibold"}>
                                       {
                                         line.sku
                                       }
                                     </td>
 
-                                    <td className="px-5 py-4">
+                                    <td className={isCycleCount ? "break-words px-3 py-4" : "px-5 py-4"}>
                                       <div className="font-medium">
                                         {
                                           line.product_name
@@ -1460,7 +1525,7 @@ export default function StockOpnameCountingPage() {
                                       </div>
                                     </td>
 
-                                    <td className="px-5 py-4 text-slate-600">
+                                    <td className={isCycleCount ? "break-words px-3 py-4 text-slate-600" : "px-5 py-4 text-slate-600"}>
                                       {[
                                         line.color,
                                         line.size,
@@ -1545,6 +1610,16 @@ export default function StockOpnameCountingPage() {
                                       </div>
                                     </td>
                                   </tr>
+                                  {session?.opname_type === "cycle_count" &&
+                                    line.counted_qty !== null &&
+                                    (line.counted_qty !== line.system_qty ||
+                                      (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+                                    <tr><td colSpan={4} className="px-3 pb-4">
+                                      <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+                                        editable={canCount} onChanged={() => refreshInvestigation(line.location_id)} />
+                                    </td></tr>
+                                  )}
+                                  </Fragment>
                                 )
                               )}
                             </tbody>
@@ -1651,8 +1726,17 @@ export default function StockOpnameCountingPage() {
                                       ✓ Saved
                                     </span>
                                   ) : null}
+                                  </div>
+                                  {session?.opname_type === "cycle_count" &&
+                                    line.counted_qty !== null &&
+                                    (line.counted_qty !== line.system_qty ||
+                                      (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+                                    <div className="mt-4">
+                                      <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+                                        editable={canCount} onChanged={() => refreshInvestigation(line.location_id)} />
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
                             )
                           )}
                         </div>
@@ -1667,14 +1751,14 @@ export default function StockOpnameCountingPage() {
               ["draft", "counting"].includes(
                 session.status
               ) &&
-              EDIT_ROLES.includes(
-                role
-              ) && (
+              canCount && (
                 <div className="sticky bottom-3 z-20 mt-5 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="text-sm font-semibold">
-                        {allCounted
+                        {allCounted && !cycleInvestigationComplete
+                          ? `${formatNumber(Number(varianceStatus?.pending_recount_lines ?? 0))} perlu Recount · ${formatNumber(Number(varianceStatus?.pending_reason_lines ?? 0))} perlu Alasan Selisih`
+                          : allCounted
                           ? "Semua SKU sudah dihitung ✓"
                           : `${formatNumber(
                               Number(
@@ -1687,7 +1771,9 @@ export default function StockOpnameCountingPage() {
                       </div>
 
                       <p className="mt-1 text-xs text-slate-500">
-                        Qty sistem dan selisih baru akan terlihat pada tahap Review.
+                        {session.opname_type === "cycle_count"
+                          ? "SKU yang berbeda dari system wajib Recount. Jika masih selisih, isi alasan dan catatan sebelum Review."
+                          : "Qty sistem dan selisih baru akan terlihat pada tahap Review."}
                       </p>
                     </div>
 
@@ -1698,6 +1784,7 @@ export default function StockOpnameCountingPage() {
                       }
                       disabled={
                         !allCounted ||
+                        !cycleInvestigationComplete ||
                         submitting ||
                         savingLineId !==
                           null

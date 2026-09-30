@@ -5,6 +5,7 @@ import { appAlert, appConfirm } from "@/utils/appDialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Fragment,
   FormEvent,
   useCallback,
   useEffect,
@@ -13,6 +14,7 @@ import {
 } from "react";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
+import CycleCountVarianceEditor from "@/components/stock-opname/CycleCountVarianceEditor";
 
 type SessionDetail = {
   session_id: string;
@@ -96,6 +98,8 @@ type ReviewLine = {
   recounted_at: string | null;
 
   total_count: number;
+  variance_reason_category?: string | null;
+  investigation_notes?: string | null;
 };
 
 type FinalizeResult = {
@@ -251,6 +255,8 @@ export default function StockOpnameReviewPage() {
     null
   );
 
+  const [pendingReasonCount, setPendingReasonCount] = useState(0);
+
   const pendingRecountCount =
     Number(
       reviewStatus?.pending_recount_lines ??
@@ -259,12 +265,14 @@ export default function StockOpnameReviewPage() {
 
   const canRecount =
     RECOUNT_ROLES.includes(role) &&
+    (session?.opname_type === "cycle_count" || role !== "warehouse_staff") &&
     session?.status === "review";
 
   const canFinalize =
     FINALIZE_ROLES.includes(role) &&
     session?.status === "review" &&
-    pendingRecountCount === 0;
+    pendingRecountCount === 0 &&
+    pendingReasonCount === 0;
 
   const activeRack =
     racks.find(
@@ -357,6 +365,16 @@ export default function StockOpnameReviewPage() {
             | undefined) ??
           null;
 
+        if (sessionRow?.opname_type === "cycle_count") {
+          const { data: reasonStatus, error: reasonError } = await supabase.rpc(
+            "get_cycle_count_variance_status", { p_session_id: id }
+          );
+          if (reasonError) throw reasonError;
+          setPendingReasonCount(Number(reasonStatus?.[0]?.pending_reason_lines ?? 0));
+        } else {
+          setPendingReasonCount(0);
+        }
+
         const rackRows =
           (racksResult.data ??
             []) as RackRow[];
@@ -415,9 +433,21 @@ export default function StockOpnameReviewPage() {
           return;
         }
 
-        const rows =
-          (data ??
-            []) as ReviewLine[];
+        let rows = (data ?? []) as ReviewLine[];
+        if (rows.length > 0) {
+          const { data: reasonData, error: reasonError } = await supabase.rpc(
+            "get_cycle_count_line_reasons", { p_line_ids: rows.map((row) => row.line_id) }
+          );
+          if (reasonError) {
+            setErrorMessage(reasonError.message);
+            setLoadingLines(false);
+            return;
+          }
+          const reasons = new Map(
+            ((reasonData ?? []) as ReviewLine[]).map((row) => [row.line_id, row])
+          );
+          rows = rows.map((row) => ({ ...row, ...reasons.get(row.line_id) }));
+        }
 
         const drafts: Record<
           string,
@@ -454,19 +484,13 @@ export default function StockOpnameReviewPage() {
       params.get("session") ??
       "";
 
-    if (!id) {
-      setErrorMessage(
-        "Session Stock Opname tidak ditemukan."
-      );
-
-      setLoading(false);
-
-      return;
-    }
-
-    setSessionId(id);
-
     async function init() {
+      if (!id) {
+        setErrorMessage("Session Stock Opname tidak ditemukan.");
+        setLoading(false);
+        return;
+      }
+      setSessionId(id);
       try {
         const {
           data: { user },
@@ -578,7 +602,7 @@ export default function StockOpnameReviewPage() {
       }
     }
 
-    init();
+    void Promise.resolve().then(init);
   }, [
     loadLines,
     loadSummary,
@@ -870,6 +894,11 @@ export default function StockOpnameReviewPage() {
     );
   }
 
+  async function refreshInvestigation(locationId: string) {
+    await loadSummary(sessionId);
+    await loadLines(sessionId, locationId, lineSearch);
+  }
+
   const sessionVariance =
     Number(
       session?.variance_lines ??
@@ -1012,6 +1041,8 @@ export default function StockOpnameReviewPage() {
                     ? `${formatNumber(
                         pendingRecountCount
                       )} SKU wajib Recount`
+                    : pendingReasonCount > 0
+                      ? `${formatNumber(pendingReasonCount)} SKU wajib isi Alasan Selisih`
                     : sessionVariance === 0
                       ? "Semua stok cocok ✓"
                       : `${formatNumber(
@@ -1029,6 +1060,8 @@ export default function StockOpnameReviewPage() {
                 >
                   {pendingRecountCount > 0
                     ? "Finalize dikunci sampai seluruh SKU yang selisih selesai Recount."
+                    : pendingReasonCount > 0
+                      ? "Lengkapi kategori dan catatan investigasi di bawah SKU yang masih selisih."
                     : sessionVariance === 0
                       ? "Tidak ada koreksi inventory yang diperlukan."
                       : "Recount sudah selesai. Selisih ini akan diposting saat Finalize."}
@@ -1303,10 +1336,8 @@ export default function StockOpnameReviewPage() {
                                     );
 
                                   return (
+                                    <Fragment key={line.line_id}>
                                     <tr
-                                      key={
-                                        line.line_id
-                                      }
                                       className={
                                         variance ===
                                         0
@@ -1392,6 +1423,8 @@ export default function StockOpnameReviewPage() {
                                           <span className="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-50 px-3 text-xs font-semibold leading-none text-emerald-700">
                                             Match ✓
                                           </span>
+                                        ) : session?.opname_type === "cycle_count" ? (
+                                          <span className="text-xs text-amber-800">Investigasi di bawah SKU</span>
                                         ) : canRecount ? (
                                           <div className="flex min-w-0 items-center gap-2">
                                             <input
@@ -1458,6 +1491,16 @@ export default function StockOpnameReviewPage() {
                                         )}
                                       </td>
                                     </tr>
+                                    {session?.opname_type === "cycle_count" &&
+                                      line.counted_qty !== null &&
+                                      (line.counted_qty !== line.system_qty ||
+                                        (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+                                      <tr><td colSpan={6} className="px-4 pb-4">
+                                        <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+                                          editable={canRecount} onChanged={() => refreshInvestigation(line.location_id)} />
+                                      </td></tr>
+                                    )}
+                                    </Fragment>
                                   );
                                 }
                               )}
@@ -1558,7 +1601,17 @@ export default function StockOpnameReviewPage() {
                                     </div>
                                   </div>
 
-                                  {variance !==
+                                  {session?.opname_type === "cycle_count" &&
+                                    line.counted_qty !== null &&
+                                    (line.counted_qty !== line.system_qty ||
+                                      (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+                                    <div className="mt-4">
+                                      <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+                                        editable={canRecount} onChanged={() => refreshInvestigation(line.location_id)} />
+                                    </div>
+                                  )}
+
+                                  {session?.opname_type !== "cycle_count" && variance !==
                                     0 &&
                                     canRecount && (
                                       <div className="mt-4">
@@ -1626,6 +1679,8 @@ export default function StockOpnameReviewPage() {
                           ? `${formatNumber(
                               pendingRecountCount
                             )} SKU wajib Recount`
+                          : pendingReasonCount > 0
+                            ? `${formatNumber(pendingReasonCount)} SKU wajib isi Alasan Selisih`
                           : sessionVariance ===
                               0
                             ? "0 SKU selisih • Siap Finalize"
@@ -1640,6 +1695,8 @@ export default function StockOpnameReviewPage() {
                         ? "Session sudah terkunci."
                         : pendingRecountCount > 0
                           ? "Selesaikan Recount terlebih dahulu. Finalize masih dikunci."
+                          : pendingReasonCount > 0
+                            ? "Lengkapi kategori dan catatan investigasi. Finalize masih dikunci."
                           : "Finalize akan mengunci session dan memposting Adjustment hanya jika ada selisih."}
                     </p>
                   </div>
@@ -1666,6 +1723,8 @@ export default function StockOpnameReviewPage() {
                           {pendingRecountCount >
                           0
                             ? "Selesaikan Recount"
+                            : pendingReasonCount > 0
+                              ? "Lengkapi Alasan Selisih"
                             : finalizing
                               ? "Finalizing..."
                               : "Finalize Stock Opname"}

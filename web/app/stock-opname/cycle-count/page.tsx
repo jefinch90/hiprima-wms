@@ -131,6 +131,7 @@ export default function CycleCountPage() {
         "owner",
         "admin",
         "warehouse_manager",
+        "warehouse_staff",
       ];
 
       if (
@@ -142,7 +143,7 @@ export default function CycleCountPage() {
           [
             "Akses Ditolak",
             "",
-            "Hanya Owner, Admin, atau Warehouse Manager",
+            "Hanya Owner, Admin, Warehouse Manager, atau Warehouse Staff",
             "yang dapat membuat sesi Cycle Count.",
           ].join("\n")
         );
