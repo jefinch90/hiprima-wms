@@ -112,6 +112,16 @@ function formatNumber(
   return Number(value ?? 0).toLocaleString("id-ID");
 }
 
+function formatPrintDate(value: string | null | undefined) {
+  if (!value) return "-";
+
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
 function typeLabel(value: string) {
   return value === "cycle_count"
     ? "Cycle Count"
@@ -862,6 +872,14 @@ export default function StockOpnameCountingPage() {
     }
   }
 
+  function printCountSheet() {
+    if (!session || !activeRack || lines.length === 0) {
+      return;
+    }
+
+    window.print();
+  }
+
   async function submitForReview() {
     if (
       !session ||
@@ -1011,9 +1029,21 @@ export default function StockOpnameCountingPage() {
     );
   }
 
+  const printPetugas =
+    lines.find((line) => line.counted_by_name)?.counted_by_name ??
+    session?.created_by_name ??
+    "";
+
+  const printDate =
+    session?.started_at ??
+    lines.find((line) => line.counted_at)?.counted_at ??
+    session?.created_at ??
+    null;
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
-      <div className="flex min-h-screen w-full max-w-full">
+    <>
+      <div className="screen-only min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
+        <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
         <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 md:p-10 md:pb-28">
@@ -1289,20 +1319,31 @@ export default function StockOpnameCountingPage() {
                           </p>
                         </div>
 
-                        {canCount && (
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() =>
-                              setShowAddSku(
-                                (value) =>
-                                  !value
-                              )
-                            }
-                            className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold"
+                            onClick={printCountSheet}
+                            disabled={lines.length === 0}
+                            className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            + SKU tidak ada di daftar
+                            Print
                           </button>
-                        )}
+
+                          {canCount && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowAddSku(
+                                  (value) =>
+                                    !value
+                                )
+                              }
+                              className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold"
+                            >
+                              + SKU tidak ada di daftar
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <form
@@ -1802,5 +1843,276 @@ export default function StockOpnameCountingPage() {
         </main>
       </div>
     </div>
+
+      <section className="print-only">
+        <div className="print-sheet">
+          <div className="print-title">STOCK OPNAME — COUNT SHEET</div>
+
+          <div className="print-meta">
+            <div>
+              <span>Session</span>
+              <strong>{session?.session_code ?? "-"}</strong>
+            </div>
+            <div>
+              <span>Rack</span>
+              <strong>{activeRack?.location_code ?? "-"}</strong>
+            </div>
+            <div>
+              <span>Area</span>
+              <strong>{activeRack?.area_name ?? "-"}</strong>
+            </div>
+            <div>
+              <span>Tanggal Count</span>
+              <strong>{formatPrintDate(printDate)}</strong>
+            </div>
+            <div>
+              <span>Petugas</span>
+              <strong>{printPetugas || "________________"}</strong>
+            </div>
+          </div>
+
+          <table className="print-table">
+            <thead>
+              <tr>
+                <th className="print-no">No</th>
+                <th className="print-sku">SKU</th>
+                <th>Produk</th>
+                <th className="print-variant">Variant</th>
+                <th className="print-qty">Qty Fisik</th>
+                <th className="print-note">Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, index) => (
+                <tr key={`print-${line.line_id}`}>
+                  <td className="print-center">{index + 1}</td>
+                  <td className="print-strong">{line.sku}</td>
+                  <td>
+                    <div className="print-strong">{line.product_name}</div>
+                    <div className="print-muted">{line.product_code}</div>
+                  </td>
+                  <td>
+                    {[
+                      line.color,
+                      line.size,
+                    ]
+                      .filter(Boolean)
+                      .join(" / ") || "-"}
+                  </td>
+                  <td className="print-blank-cell">&nbsp;</td>
+                  <td className="print-blank-cell">&nbsp;</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="print-general-note">
+            <div className="print-label">Catatan Umum</div>
+            <div className="print-note-box">
+              {session?.notes || ""}
+            </div>
+          </div>
+
+          <div className="print-signatures">
+            <div>
+              <div>Petugas</div>
+              <div className="signature-space" />
+              <div className="signature-line">
+                {printPetugas || "Nama / tanda tangan"}
+              </div>
+            </div>
+            <div>
+              <div>Checker</div>
+              <div className="signature-space" />
+              <div className="signature-line">
+                Nama / tanda tangan
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <style jsx global>{`
+        .screen-only {
+          display: block;
+        }
+
+        .print-only {
+          display: none;
+        }
+
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 8mm;
+          }
+
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+          }
+
+          .screen-only {
+            display: none !important;
+          }
+
+          .print-only {
+            display: block !important;
+          }
+
+          .print-sheet {
+            width: 100%;
+            color: #000;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 11px;
+          }
+
+          .print-title {
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+          }
+
+          .print-meta {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr 1fr 1fr 1.5fr;
+            gap: 7px;
+            margin-bottom: 12px;
+          }
+
+          .print-meta > div {
+            min-height: 48px;
+            padding: 8px 10px;
+            border: 1px solid #000;
+          }
+
+          .print-meta span {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 8.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+          }
+
+          .print-meta strong {
+            display: block;
+            font-size: 11px;
+          }
+
+          .print-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+          }
+
+          .print-table thead {
+            display: table-header-group;
+          }
+
+          .print-table tr {
+            page-break-inside: avoid;
+          }
+
+          .print-table th,
+          .print-table td {
+            border: 1px solid #000;
+            padding: 8px 9px;
+            vertical-align: middle;
+          }
+
+          .print-table th {
+            text-align: center;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+
+          .print-table td {
+            height: 40px;
+          }
+
+          .print-no {
+            width: 5%;
+          }
+
+          .print-sku {
+            width: 17%;
+          }
+
+          .print-variant {
+            width: 16%;
+          }
+
+          .print-qty {
+            width: 12%;
+          }
+
+          .print-note {
+            width: 20%;
+          }
+
+          .print-center {
+            text-align: center;
+          }
+
+          .print-strong {
+            font-weight: 700;
+          }
+
+          .print-muted {
+            margin-top: 2px;
+            font-size: 9px;
+          }
+
+          .print-blank-cell {
+            height: 40px;
+          }
+
+          .print-general-note {
+            margin-top: 12px;
+          }
+
+          .print-label {
+            margin-bottom: 5px;
+            font-size: 10px;
+            font-weight: 800;
+          }
+
+          .print-note-box {
+            min-height: 52px;
+            padding: 8px 10px;
+            border: 1px solid #000;
+            white-space: pre-wrap;
+          }
+
+          .print-signatures {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 80px;
+            margin-top: 32px;
+            page-break-inside: avoid;
+          }
+
+          .print-signatures > div {
+            text-align: center;
+          }
+
+          .signature-space {
+            height: 64px;
+          }
+
+          .signature-line {
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            font-size: 10px;
+          }
+        }
+      `}</style>
+    </>
   );
 }
