@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-
 import {
   FormEvent,
   useCallback,
@@ -323,14 +321,7 @@ export default function ProductsPage() {
                                   R: {variant.reject_locations}
                                 </div>
                               )}
-                            
-          <Link
-            href={`/stock-movement?q=${encodeURIComponent(variant.sku)}`}
-            className="mt-2 inline-flex shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium hover:bg-slate-50"
-          >
-            Movement
-          </Link>
-        </td>
+                            </td>
                           </tr>
                         ))}
                       </tbody>

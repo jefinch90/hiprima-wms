@@ -487,6 +487,15 @@ export default function StockOpnameReviewPage() {
   ] = useState(false);
 
 
+  const [
+
+    safeTestRunning,
+
+    setSafeTestRunning,
+
+  ] = useState(false);
+
+
 
   const [
 
@@ -1545,6 +1554,157 @@ export default function StockOpnameReviewPage() {
 
 
 
+  const isDevelopment =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1");
+
+
+
+  async function handleSafeFinalizeTest() {
+
+    if (
+      !isDevelopment ||
+      !session ||
+      !sessionId ||
+      !canFinalize ||
+      safeTestRunning
+    ) {
+      return;
+    }
+
+    const confirmed = await appConfirm(
+      [
+        "TEST FINALIZE — SAFE",
+        "",
+        `Session: ${session.session_code}`,
+        `SKU: ${formatNumber(session.total_lines)}`,
+        "",
+        "Mode TEST saja.",
+        "Inventory TIDAK berubah.",
+        "Stock Movement TIDAK dibuat.",
+        "Status session TIDAK diubah.",
+        "",
+        "Sistem hanya menghitung simulasi Adjustment IN / OUT dari hasil Review.",
+      ].join("\n")
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSafeTestRunning(true);
+    setErrorMessage("");
+
+    try {
+      const { data: rackData, error: rackError } =
+        await supabase.rpc(
+          "get_stock_opname_racks",
+          { p_session_id: sessionId }
+        );
+
+      if (rackError) {
+        throw rackError;
+      }
+
+      const rackRows = (rackData ?? []) as RackRow[];
+      const pageSize = 500;
+      const allRows: ReviewLine[] = [];
+
+      for (const rack of rackRows) {
+        let offset = 0;
+
+        while (true) {
+          const { data, error } = await supabase.rpc(
+            "get_stock_opname_lines_by_rack",
+            {
+              p_session_id: sessionId,
+              p_location_id: rack.location_id,
+              p_search: null,
+              p_limit: pageSize,
+              p_offset: offset,
+            }
+          );
+
+          if (error) {
+            throw error;
+          }
+
+          const page = (data ?? []) as ReviewLine[];
+          allRows.push(...page);
+
+          if (page.length < pageSize) {
+            break;
+          }
+
+          offset += pageSize;
+        }
+      }
+
+      if (allRows.length !== Number(session.total_lines)) {
+        throw new Error(
+          `Test berhenti: data line terbaca ${formatNumber(allRows.length)} dari ${formatNumber(session.total_lines)} SKU.`
+        );
+      }
+
+      let adjustmentLines = 0;
+      let qtyAdjustmentIn = 0;
+      let qtyAdjustmentOut = 0;
+      let missingFinalCount = 0;
+
+      for (const line of allRows) {
+        const systemQty = Number(line.system_qty ?? 0);
+        const finalQty = Number(line.final_count_qty ?? NaN);
+
+        if (!Number.isFinite(finalQty)) {
+          missingFinalCount += 1;
+          continue;
+        }
+
+        const variance = finalQty - systemQty;
+
+        if (variance > 0) {
+          adjustmentLines += 1;
+          qtyAdjustmentIn += variance;
+        } else if (variance < 0) {
+          adjustmentLines += 1;
+          qtyAdjustmentOut += Math.abs(variance);
+        }
+      }
+
+      if (missingFinalCount > 0) {
+        throw new Error(
+          `Test berhenti: ${formatNumber(missingFinalCount)} SKU belum memiliki Final Count.`
+        );
+      }
+
+      await appAlert(
+        [
+          "TEST FINALIZE SELESAI ✓",
+          "",
+          `Session: ${session.session_code}`,
+          `SKU diperiksa: ${formatNumber(allRows.length)}`,
+          `Adjustment lines: ${formatNumber(adjustmentLines)}`,
+          `Adjustment IN: +${formatNumber(qtyAdjustmentIn)}`,
+          `Adjustment OUT: -${formatNumber(qtyAdjustmentOut)}`,
+          "",
+          "AMAN: Inventory tidak berubah.",
+          "Stock Movement tidak dibuat.",
+          "Session tetap di Review.",
+        ].join("\n")
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "TEST FINALIZE gagal."
+      );
+    } finally {
+      setSafeTestRunning(false);
+    }
+  }
+
+
   async function handleFinalize() {
 
     if (
@@ -2110,7 +2270,6 @@ export default function StockOpnameReviewPage() {
               </div>
 
             )}
-
 
 
 
@@ -3388,6 +3547,26 @@ export default function StockOpnameReviewPage() {
 
                         <>
 
+                          {isDevelopment && (
+
+                          <button
+                            type="button"
+                            onClick={handleSafeFinalizeTest}
+                            disabled={
+                              !canFinalize ||
+                              safeTestRunning ||
+                              finalizing ||
+                              savingLineId !== null
+                            }
+                            className="shrink-0 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {safeTestRunning
+                              ? "Testing..."
+                              : "TEST Finalize (SAFE)"}
+                          </button>
+
+                          )}
+
                           <button
 
                           type="button"
@@ -3399,10 +3578,18 @@ export default function StockOpnameReviewPage() {
                           }
 
                           disabled={
-  !canFinalize ||
-  finalizing ||
-  savingLineId !== null
-}
+
+                            !canFinalize ||
+
+                            isDevelopment ||
+
+                            finalizing ||
+
+                            savingLineId !==
+
+                              null
+
+                          }
 
                           className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
 

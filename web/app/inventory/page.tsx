@@ -218,9 +218,7 @@ export default function InventoryPage() {
                 <button
                   type="submit"
                   className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
-                >
-                  Search
-                </button>
+                >Cari</button>
 
                 {search && (
                   <button

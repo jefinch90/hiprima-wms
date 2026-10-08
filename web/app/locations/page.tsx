@@ -335,9 +335,7 @@ export default function LocationsPage() {
                 <button
                   type="submit"
                   className="rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
-                >
-                  Search
-                </button>
+                >Cari</button>
 
                 {search && (
                   <button
