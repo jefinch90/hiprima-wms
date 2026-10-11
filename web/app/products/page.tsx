@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
+
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
@@ -29,10 +30,15 @@ type VariantRow = {
   color: string | null;
   size: string | null;
   barcode: string | null;
+
+  hpp: number | string | null;
+  selling_price: number | string | null;
+
   normal_qty: number | string;
   defect_qty: number | string;
   reject_qty: number | string;
   total_qty: number | string;
+
   normal_locations: string | null;
   defect_locations: string | null;
   reject_locations: string | null;
@@ -111,6 +117,23 @@ export default function ProductsPage() {
   const formatNumber = (
     value: number | string | null | undefined
   ) => Number(value ?? 0).toLocaleString("id-ID");
+
+  /**
+   * Format hanya untuk tampilan UI.
+   *
+   * Database tetap menyimpan hpp dan selling_price
+   * sebagai numeric sehingga tetap bisa dihitung / SUM
+   * / diexport sebagai angka.
+   */
+  const formatRupiah = (
+    value: number | string | null | undefined
+  ) => {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+
+    return `Rp ${Number(value).toLocaleString("id-ID")}`;
+  };
 
   const detailTotalQty = variants.reduce(
     (total, item) =>
@@ -230,6 +253,7 @@ export default function ProductsPage() {
                     <div className="text-sm text-slate-500">
                       Variants / SKU
                     </div>
+
                     <div className="mt-2 text-xl font-bold">
                       {formatNumber(variants.length)}
                     </div>
@@ -239,6 +263,7 @@ export default function ProductsPage() {
                     <div className="text-sm text-slate-500">
                       Total Stock
                     </div>
+
                     <div className="mt-2 text-xl font-bold">
                       {formatNumber(detailTotalQty)}
                     </div>
@@ -251,24 +276,44 @@ export default function ProductsPage() {
                   </div>
                 ) : (
                   <div className="w-full max-w-full overflow-x-auto">
-                    <table className="w-full min-w-[1000px] text-left text-sm">
+                    <table className="w-full min-w-[1250px] text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500">
                         <tr>
-                          <th className="px-4 py-3">SKU</th>
-                          <th className="px-4 py-3">Variant</th>
+                          <th className="px-4 py-3">
+                            SKU
+                          </th>
+
+                          <th className="px-4 py-3">
+                            Variant
+                          </th>
+
+                          <th className="px-4 py-3 text-right">
+                            HPP
+                          </th>
+
+                          <th className="px-4 py-3 text-right">
+                            Harga Jual
+                          </th>
+
                           <th className="px-4 py-3 text-right">
                             Normal
                           </th>
+
                           <th className="px-4 py-3 text-right">
                             Defect
                           </th>
+
                           <th className="px-4 py-3 text-right">
                             Reject
                           </th>
+
                           <th className="px-4 py-3 text-right">
                             Total
                           </th>
-                          <th className="px-4 py-3">Location</th>
+
+                          <th className="px-4 py-3">
+                            Location
+                          </th>
                         </tr>
                       </thead>
 
@@ -284,9 +329,18 @@ export default function ProductsPage() {
 
                             <td className="px-4 py-3">
                               {variant.color ?? "-"}
+
                               <div className="text-xs text-slate-400">
                                 Size: {variant.size ?? "-"}
                               </div>
+                            </td>
+
+                            <td className="px-4 py-3 text-right whitespace-nowrap font-medium">
+                              {formatRupiah(variant.hpp)}
+                            </td>
+
+                            <td className="px-4 py-3 text-right whitespace-nowrap font-medium">
+                              {formatRupiah(variant.selling_price)}
                             </td>
 
                             <td className="px-4 py-3 text-right">
@@ -323,14 +377,16 @@ export default function ProductsPage() {
                                   R: {variant.reject_locations}
                                 </div>
                               )}
-                            
-          <Link
-            href={`/stock-movement?q=${encodeURIComponent(variant.sku)}`}
-            className="mt-2 inline-flex shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium hover:bg-slate-50"
-          >
-            Movement
-          </Link>
-        </td>
+
+                              <Link
+                                href={`/stock-movement?q=${encodeURIComponent(
+                                  variant.sku
+                                )}`}
+                                className="mt-2 inline-flex shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium hover:bg-slate-50"
+                              >
+                                Movement
+                              </Link>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -357,14 +413,16 @@ export default function ProductsPage() {
 
                 <button
                   type="submit"
-                  className="rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
-                >Cari</button>
+                  className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-medium text-white"
+                >
+                  Cari
+                </button>
 
                 {search && (
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="rounded-xl border border-slate-300 px-5 py-3 text-sm"
+                    className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-sm"
                   >
                     Reset
                   </button>
@@ -379,6 +437,7 @@ export default function ProductsPage() {
                   <h2 className="text-lg font-semibold">
                     Product List
                   </h2>
+
                   <p className="text-sm text-slate-500">
                     {formatNumber(totalCount)} produk ditemukan
                   </p>
@@ -398,15 +457,24 @@ export default function ProductsPage() {
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
-                        <th className="px-5 py-4">Product</th>
-                        <th className="px-5 py-4">Brand</th>
+                        <th className="px-5 py-4">
+                          Product
+                        </th>
+
+                        <th className="px-5 py-4">
+                          Brand
+                        </th>
+
                         <th className="px-5 py-4 text-right">
                           Variants
                         </th>
+
                         <th className="px-5 py-4 text-right">
                           Stock
                         </th>
-                        <th className="px-5 py-4"></th>
+
+                        <th className="px-5 py-4">
+                        </th>
                       </tr>
                     </thead>
 
@@ -420,6 +488,7 @@ export default function ProductsPage() {
                             <div className="font-semibold">
                               {product.product_name}
                             </div>
+
                             <div className="text-xs text-slate-400">
                               {product.product_code}
                             </div>
@@ -502,8 +571,10 @@ export default function ProductsPage() {
               </div>
 
             </section>
+
           </div>
         </main>
+
       </div>
     </div>
   );
