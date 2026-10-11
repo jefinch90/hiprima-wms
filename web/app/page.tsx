@@ -1,236 +1,279 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
 
 type StockAreaRow = {
-  stock_area: string;
+  stock_area: string | null;
   total_qty: number | string | null;
 };
 
-type DashboardData = {
-  normalStock: number;
-  defectStock: number;
-  rejectStock: number;
-  productsCount: number;
-  variantsCount: number;
-  warehousesCount: number;
-  stockAreasCount: number;
-};
+type ValuationSummary = {
+  normal_qty: number | string | null;
+  defect_qty: number | string | null;
+  reject_qty: number | string | null;
+  total_qty: number | string | null;
 
-const initialDashboardData: DashboardData = {
-  normalStock: 0,
-  defectStock: 0,
-  rejectStock: 0,
-  productsCount: 0,
-  variantsCount: 0,
-  warehousesCount: 0,
-  stockAreasCount: 0,
+  normal_inventory_value_hpp: number | string | null;
+  defect_inventory_value_hpp: number | string | null;
+  reject_inventory_value_hpp: number | string | null;
+  total_inventory_value_hpp: number | string | null;
+
+  potential_sales_value: number | string | null;
+  potential_gross_profit: number | string | null;
+  margin_pct: number | string | null;
 };
 
 export default function Home() {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
-
-  const [dashboardData, setDashboardData] =
-    useState<DashboardData>(initialDashboardData);
+  const [supabase] = useState(() => createClient());
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
-  useEffect(() => {
-    async function loadDashboard() {
-      setLoading(true);
-      setErrorMessage("");
+  const [productsCount, setProductsCount] = useState(0);
+  const [variantsCount, setVariantsCount] = useState(0);
+  const [warehousesCount, setWarehousesCount] = useState(0);
+  const [stockAreasCount, setStockAreasCount] = useState(0);
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+  const [normalStock, setNormalStock] = useState(0);
+  const [defectStock, setDefectStock] = useState(0);
+  const [rejectStock, setRejectStock] = useState(0);
 
-      if (userError || !user) {
-        router.replace("/login");
-        return;
-      }
+  const [valuation, setValuation] =
+    useState<ValuationSummary | null>(null);
 
-      const { data: stockAreaData, error: stockAreaError } =
-        await supabase.rpc("get_stock_by_area");
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage("");
 
-      if (stockAreaError) {
-        setErrorMessage(
-          `Stock area error: ${stockAreaError.message}`
-        );
-        setLoading(false);
-        return;
-      }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      const [
-        productsResult,
-        variantsResult,
-        warehousesResult,
-        stockAreasResult,
-      ] = await Promise.all([
-        supabase
-          .from("products")
-          .select("id", {
-            count: "exact",
-            head: true,
-          }),
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
 
-        supabase
-          .from("product_variants")
-          .select("id", {
-            count: "exact",
-            head: true,
-          }),
+    const [
+      stockAreaResult,
+      valuationResult,
+      productsResult,
+      variantsResult,
+      warehousesResult,
+      stockAreasResult,
+    ] = await Promise.all([
+      supabase.rpc("get_stock_by_area"),
 
-        supabase
-          .from("warehouses")
-          .select("id", {
-            count: "exact",
-            head: true,
-          }),
+      supabase.rpc("get_inventory_valuation_summary"),
 
-        supabase
-          .from("stock_areas")
-          .select("id", {
-            count: "exact",
-            head: true,
-          }),
-      ]);
+      supabase
+        .from("products")
+        .select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-      const queryError =
-        productsResult.error ||
-        variantsResult.error ||
-        warehousesResult.error ||
-        stockAreasResult.error;
+      supabase
+        .from("product_variants")
+        .select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-      if (queryError) {
-        setErrorMessage(queryError.message);
-        setLoading(false);
-        return;
-      }
+      supabase
+        .from("warehouses")
+        .select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-      const rows = (stockAreaData ?? []) as StockAreaRow[];
+      supabase
+        .from("stock_areas")
+        .select("id", {
+          count: "exact",
+          head: true,
+        }),
+    ]);
 
-      const normalStock = Number(
-        rows.find(
+    if (stockAreaResult.error) {
+      setErrorMessage(
+        `Stock area error: ${stockAreaResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (valuationResult.error) {
+      setErrorMessage(
+        `Valuation error: ${valuationResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (productsResult.error) {
+      setErrorMessage(
+        `Products error: ${productsResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (variantsResult.error) {
+      setErrorMessage(
+        `Variants error: ${variantsResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (warehousesResult.error) {
+      setErrorMessage(
+        `Warehouse error: ${warehousesResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (stockAreasResult.error) {
+      setErrorMessage(
+        `Stock area master error: ${stockAreasResult.error.message}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    const stockAreas =
+      (stockAreaResult.data ?? []) as StockAreaRow[];
+
+    const summaryRows =
+      (valuationResult.data ?? []) as ValuationSummary[];
+
+    const summary =
+      summaryRows[0] ?? null;
+
+    setValuation(summary);
+
+    const normal =
+      Number(
+        stockAreas.find(
           (row) => row.stock_area === "NORMAL"
         )?.total_qty ?? 0
       );
 
-      const defectStock = Number(
-        rows.find(
+    const defect =
+      Number(
+        stockAreas.find(
           (row) => row.stock_area === "DEFECT"
         )?.total_qty ?? 0
       );
 
-      const rejectStock = Number(
-        rows.find(
+    const reject =
+      Number(
+        stockAreas.find(
           (row) => row.stock_area === "REJECT"
         )?.total_qty ?? 0
       );
 
-      setDashboardData({
-        normalStock,
-        defectStock,
-        rejectStock,
-        productsCount: productsResult.count ?? 0,
-        variantsCount: variantsResult.count ?? 0,
-        warehousesCount: warehousesResult.count ?? 0,
-        stockAreasCount: stockAreasResult.count ?? 0,
-      });
+    setNormalStock(normal);
+    setDefectStock(defect);
+    setRejectStock(reject);
 
-      setLoading(false);
-    }
+    setProductsCount(
+      Number(productsResult.count ?? 0)
+    );
 
-    loadDashboard();
+    setVariantsCount(
+      Number(variantsResult.count ?? 0)
+    );
+
+    setWarehousesCount(
+      Number(warehousesResult.count ?? 0)
+    );
+
+    setStockAreasCount(
+      Number(stockAreasResult.count ?? 0)
+    );
+
+    setLoading(false);
   }, [router, supabase]);
 
-  const formatNumber = (value: number) =>
-    value.toLocaleString("id-ID");
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
   const totalStock =
-    dashboardData.normalStock +
-    dashboardData.defectStock +
-    dashboardData.rejectStock;
+    normalStock +
+    defectStock +
+    rejectStock;
 
-  const stats = [
-    {
-      label: "Total Stock",
-      value: formatNumber(totalStock),
-      description: "Seluruh stok gudang",
-    },
-    {
-      label: "Normal",
-      value: formatNumber(
-        dashboardData.normalStock
-      ),
-      description: "Stok siap jual",
-    },
-    {
-      label: "Defect",
-      value: formatNumber(
-        dashboardData.defectStock
-      ),
-      description: "Stok perlu pengecekan",
-    },
-    {
-      label: "Reject",
-      value: formatNumber(
-        dashboardData.rejectStock
-      ),
-      description: "Stok reject",
-    },
-  ];
+  const formatNumber = (
+    value: number | string | null | undefined
+  ) =>
+    Number(value ?? 0).toLocaleString("id-ID");
 
-  const summary = [
-    {
-      label: "Products",
-      value: formatNumber(
-        dashboardData.productsCount
-      ),
-    },
-    {
-      label: "SKU / Variants",
-      value: formatNumber(
-        dashboardData.variantsCount
-      ),
-    },
-    {
-      label: "Warehouse",
-      value: formatNumber(
-        dashboardData.warehousesCount
-      ),
-    },
-    {
-      label: "Stock Areas",
-      value: formatNumber(
-        dashboardData.stockAreasCount
-      ),
-    },
-  ];
+  const formatRupiah = (
+    value: number | string | null | undefined
+  ) =>
+    `Rp ${Number(value ?? 0).toLocaleString("id-ID")}`;
 
-  const stockAreaRows = [
-    {
-      area: "NORMAL",
-      description:
-        "Area Stok Normal / Siap Jual",
-      quantity: dashboardData.normalStock,
-    },
-    {
-      area: "DEFECT",
-      description: "Area Stok Defect",
-      quantity: dashboardData.defectStock,
-    },
-    {
-      area: "REJECT",
-      description: "Area Stok Reject",
-      quantity: dashboardData.rejectStock,
-    },
-  ];
+  const formatPercent = (
+    value: number | string | null | undefined
+  ) => {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return "-";
+    }
+
+    return `${Number(value).toLocaleString(
+      "id-ID",
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }
+    )}%`;
+  };
+
+  const totalInventoryValue =
+    Number(
+      valuation?.total_inventory_value_hpp ?? 0
+    );
+
+  const normalInventoryValue =
+    Number(
+      valuation?.normal_inventory_value_hpp ?? 0
+    );
+
+  const defectInventoryValue =
+    Number(
+      valuation?.defect_inventory_value_hpp ?? 0
+    );
+
+  const rejectInventoryValue =
+    Number(
+      valuation?.reject_inventory_value_hpp ?? 0
+    );
+
+  const potentialSales =
+    Number(
+      valuation?.potential_sales_value ?? 0
+    );
+
+  const potentialGrossProfit =
+    Number(
+      valuation?.potential_gross_profit ?? 0
+    );
+
+  const margin =
+    valuation?.margin_pct == null
+      ? null
+      : Number(valuation.margin_pct);
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
@@ -239,142 +282,366 @@ export default function Home() {
         <Sidebar />
 
         <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
-          <div className="mx-auto w-full min-w-0 max-w-7xl">
+          <div className="mx-auto w-full min-w-0 max-w-[1400px]">
 
-            <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="mb-1 text-sm font-medium text-slate-500">
-                  PT Prima Berkah Mulia
-                </p>
+            {/* HEADER */}
+            <header className="mb-8">
+              <p className="text-sm text-slate-500">
+                PT Prima Berkah Mulia
+              </p>
 
-                <h1 className="text-3xl font-bold tracking-tight">
-                  Warehouse Dashboard
-                </h1>
+              <h1 className="mt-1 text-3xl font-bold">
+                Warehouse Dashboard
+              </h1>
 
-                <p className="mt-2 text-sm text-slate-500">
-                  Monitoring stok Hi.PRIMA • Live Database
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 shadow-sm">
-                Gudang Utama Hi.PRIMA
-              </div>
+              <p className="mt-2 text-sm text-slate-500">
+                Monitoring stok Hi.PRIMA • Live Database
+              </p>
             </header>
 
+            {/* ERROR */}
             {errorMessage && (
-              <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+              <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-800">
                 {errorMessage}
               </div>
             )}
 
-            {loading ? (
-              <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500 shadow-sm">
-                Memuat dashboard...
+            {/* STOCK SUMMARY */}
+            <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p className="text-sm font-medium text-slate-500">
+                  Total Stock
+                </p>
+
+                <p className="mt-3 text-3xl font-bold">
+                  {formatNumber(totalStock)}
+                </p>
+
+                <p className="mt-2 text-xs text-slate-400">
+                  Normal + Defect + Reject
+                </p>
               </div>
-            ) : (
-              <>
-                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  {stats.map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-                    >
-                      <p className="text-sm font-medium text-slate-500">
-                        {item.label}
-                      </p>
 
-                      <p className="mt-3 text-3xl font-bold tracking-tight">
-                        {item.value}
-                      </p>
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p className="text-sm font-medium text-slate-500">
+                  Normal
+                </p>
 
-                      <p className="mt-2 text-xs text-slate-400">
-                        {item.description}
-                      </p>
-                    </div>
-                  ))}
-                </section>
+                <p className="mt-3 text-3xl font-bold">
+                  {formatNumber(normalStock)}
+                </p>
 
-                <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-lg font-semibold">
-                      Warehouse Summary
-                    </h2>
+                <p className="mt-2 text-xs text-slate-400">
+                  Siap Jual
+                </p>
+              </div>
 
-                    <p className="text-sm text-slate-500">
-                      Ringkasan data master WMS
-                    </p>
-                  </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p className="text-sm font-medium text-slate-500">
+                  Defect
+                </p>
 
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    {summary.map((item) => (
-                      <div
-                        key={item.label}
-                        className="rounded-xl bg-slate-50 p-5"
-                      >
-                        <p className="text-sm text-slate-500">
-                          {item.label}
-                        </p>
+                <p className="mt-3 text-3xl font-bold">
+                  {formatNumber(defectStock)}
+                </p>
 
-                        <p className="mt-2 text-2xl font-semibold">
-                          {item.value}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                <p className="mt-2 text-xs text-slate-400">
+                  Perlu pengecekan
+                </p>
+              </div>
 
-                <section className="mt-6 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 p-6">
-                    <h2 className="text-lg font-semibold">
-                      Stock by Area
-                    </h2>
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p className="text-sm font-medium text-slate-500">
+                  Reject
+                </p>
 
-                    <p className="text-sm text-slate-500">
-                      Kondisi stok berdasarkan area gudang
-                    </p>
-                  </div>
+                <p className="mt-3 text-3xl font-bold">
+                  {formatNumber(rejectStock)}
+                </p>
 
-                  <div className="w-full max-w-full overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 text-slate-500">
-                        <tr>
-                          <th className="px-6 py-4 font-medium">
-                            Area
-                          </th>
+                <p className="mt-2 text-xs text-slate-400">
+                  Stok reject
+                </p>
+              </div>
 
-                          <th className="px-6 py-4 font-medium">
-                            Description
-                          </th>
+            </section>
 
-                          <th className="px-6 py-4 text-right font-medium">
-                            Quantity
-                          </th>
-                        </tr>
-                      </thead>
+            {/* WAREHOUSE SUMMARY */}
+            <section className="mb-8">
 
-                      <tbody className="divide-y divide-slate-100">
-                        {stockAreaRows.map((item) => (
-                          <tr key={item.area}>
-                            <td className="px-6 py-4 font-medium">
-                              {item.area}
-                            </td>
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold">
+                  Warehouse Summary
+                </h2>
+              </div>
 
-                            <td className="px-6 py-4 text-slate-500">
-                              {item.description}
-                            </td>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-                            <td className="px-6 py-4 text-right font-semibold">
-                              {formatNumber(
-                                item.quantity
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              </>
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Products
+                  </p>
+
+                  <p className="mt-3 text-3xl font-bold">
+                    {formatNumber(productsCount)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    SKU / Variants
+                  </p>
+
+                  <p className="mt-3 text-3xl font-bold">
+                    {formatNumber(variantsCount)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Warehouse
+                  </p>
+
+                  <p className="mt-3 text-3xl font-bold">
+                    {formatNumber(warehousesCount)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Stock Areas
+                  </p>
+
+                  <p className="mt-3 text-3xl font-bold">
+                    {formatNumber(stockAreasCount)}
+                  </p>
+                </div>
+
+              </div>
+            </section>
+
+            {/* INVENTORY VALUATION */}
+            <section className="mb-8">
+
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold">
+                  Inventory Valuation
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Nilai stok berdasarkan HPP • Normal + Defect + Reject
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Inventory Value (HPP)
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(totalInventoryValue)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Semua status stok
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Nilai HPP Normal
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(normalInventoryValue)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Normal stock
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Nilai HPP Defect
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(defectInventoryValue)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Tetap dihitung sebagai nilai stok
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Nilai HPP Reject
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(rejectInventoryValue)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Tetap dihitung sebagai nilai stok
+                  </p>
+                </div>
+
+              </div>
+            </section>
+
+            {/* POTENTIAL SALES & PROFIT */}
+            <section className="mb-8">
+
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold">
+                  Potential Sales & Profit
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Hanya berdasarkan stok NORMAL
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Potential Sales Value
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(potentialSales)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Normal × Harga Jual
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Potential Gross Profit
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatRupiah(potentialGrossProfit)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Normal × (Harga Jual − HPP)
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">
+                    Margin
+                  </p>
+
+                  <p className="mt-3 text-2xl font-bold">
+                    {formatPercent(margin)}
+                  </p>
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    Gross Profit ÷ Potential Sales
+                  </p>
+                </div>
+
+              </div>
+            </section>
+
+            {/* STOCK BY AREA */}
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+              <div className="border-b border-slate-200 p-6">
+                <h2 className="text-xl font-semibold">
+                  Stock by Area
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Ringkasan stok berdasarkan area inventory
+                </p>
+              </div>
+
+              <div className="w-full max-w-full overflow-x-auto">
+
+                <table className="w-full min-w-[650px] text-left text-sm">
+
+                  <thead className="bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="px-6 py-4 font-semibold">
+                        Area
+                      </th>
+
+                      <th className="px-6 py-4 font-semibold">
+                        Description
+                      </th>
+
+                      <th className="px-6 py-4 text-right font-semibold">
+                        Quantity
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+
+                    <tr>
+                      <td className="px-6 py-5 font-semibold">
+                        NORMAL
+                      </td>
+
+                      <td className="px-6 py-5 text-slate-600">
+                        Area Stok Normal / Siap Jual
+                      </td>
+
+                      <td className="px-6 py-5 text-right font-semibold">
+                        {formatNumber(normalStock)}
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td className="px-6 py-5 font-semibold">
+                        DEFECT
+                      </td>
+
+                      <td className="px-6 py-5 text-slate-600">
+                        Area Stok Defect
+                      </td>
+
+                      <td className="px-6 py-5 text-right font-semibold">
+                        {formatNumber(defectStock)}
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td className="px-6 py-5 font-semibold">
+                        REJECT
+                      </td>
+
+                      <td className="px-6 py-5 text-slate-600">
+                        Area Stok Reject
+                      </td>
+
+                      <td className="px-6 py-5 text-right font-semibold">
+                        {formatNumber(rejectStock)}
+                      </td>
+                    </tr>
+
+                  </tbody>
+
+                </table>
+              </div>
+            </section>
+
+            {loading && (
+              <div className="mt-4 text-center text-sm text-slate-400">
+                Loading dashboard...
+              </div>
             )}
 
           </div>
