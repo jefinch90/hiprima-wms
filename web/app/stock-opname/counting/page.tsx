@@ -1910,7 +1910,7 @@ export default function StockOpnameCountingPage() {
 
       (rack) =>
 
-        Number(rack.total_lines) === 0 ||
+        Number(rack.total_lines) > 0 &&
 
         Number(rack.counted_lines) >= Number(rack.total_lines)
 
