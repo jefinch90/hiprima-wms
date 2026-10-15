@@ -1,1281 +1,2896 @@
 "use client";
 
+
+
 import { appAlert, appConfirm } from "@/utils/appDialog";
 
+
+
 import Link from "next/link";
+
 import { useRouter } from "next/navigation";
+
 import {
+
   Fragment,
+
   FormEvent,
+
   KeyboardEvent,
+
   useCallback,
+
   useEffect,
+
   useMemo,
+
   useRef,
+
   useState,
+
 } from "react";
+
 import Sidebar from "@/components/Sidebar";
+
 import { createClient } from "@/utils/supabase/client";
+
 import CycleCountVarianceEditor from "@/components/stock-opname/CycleCountVarianceEditor";
 
+
+
 type SessionDetail = {
+
   session_id: string;
+
   session_code: string;
+
   opname_type: string;
+
   status: string;
+
   notes: string | null;
+
   total_locations: number;
+
   completed_locations: number;
+
   total_lines: number;
+
   counted_lines: number;
+
   variance_lines: number;
+
   progress_percent: number;
+
   created_by: string | null;
+
   created_by_name: string | null;
+
   created_at: string;
+
   started_at: string | null;
+
   submitted_at: string | null;
+
   finalized_by: string | null;
+
   finalized_at: string | null;
+
   adjustment_lines: number;
+
   qty_adjustment_in: number;
+
   qty_adjustment_out: number;
+
 };
+
+
 
 type RackRow = {
+
   location_id: string;
+
   location_code: string;
+
   location_name: string;
+
   area_code: string;
+
   area_name: string;
+
   total_lines: number;
+
   counted_lines: number;
+
   variance_lines: number;
+
   progress_percent: number;
+
   is_complete: boolean;
+
 };
+
+
 
 type CountLine = {
+
   line_id: string;
+
   variant_id: string;
+
   sku: string;
+
   product_code: string;
+
   product_name: string;
+
   color: string | null;
+
   size: string | null;
+
   location_id: string;
+
   location_code: string;
+
   location_name: string;
+
   area_code: string;
+
   area_name: string;
+
   system_qty: number;
+
   counted_qty: number | null;
+
   recount_qty: number | null;
+
   final_count_qty: number | null;
+
   variance: number | null;
+
   counted_by: string | null;
+
   counted_by_name: string | null;
+
   counted_at: string | null;
+
   recounted_by: string | null;
+
   recounted_by_name: string | null;
+
   recounted_at: string | null;
+
   total_count: number;
+
   variance_reason_category?: string | null;
+
   investigation_notes?: string | null;
+
 };
+
+
 
 type VarianceStatus = {
+
   pending_recount_lines: number;
+
   pending_reason_lines: number;
+
 };
+
+
 
 type SearchSkuRow = {
+
   variant_id: string;
+
   sku: string;
+
   product_code: string;
+
   product_name: string;
+
   brand: string | null;
+
   color: string | null;
+
   size: string | null;
+
   total_qty: number | string;
+
 };
 
+
+
 const EDIT_ROLES = [
+
   "owner",
+
   "admin",
+
   "warehouse_manager",
+
   "warehouse_staff",
+
 ];
 
+
+
 function formatNumber(
+
   value: number | string | null | undefined
+
 ) {
+
   return Number(value ?? 0).toLocaleString("id-ID");
+
 }
+
+
 
 function typeLabel(value: string) {
+
   return value === "cycle_count"
+
     ? "Cycle Count"
+
     : "Full Stock Opname";
+
 }
+
+
 
 function statusLabel(value: string) {
+
   const labels: Record<string, string> = {
+
     draft: "Draft",
+
     counting: "Counting",
+
     review: "Review",
+
     finalized: "Finalized",
+
     cancelled: "Cancelled",
+
   };
 
+
+
   return labels[value] ?? value;
+
 }
 
+
+
+function escapePrintHtml(value: string | number | null | undefined) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+
 export default function StockOpnameCountingPage() {
+
   const router = useRouter();
 
+
+
   const supabase = useMemo(
+
     () => createClient(),
+
     []
+
   );
 
+
+
   const [sessionId, setSessionId] =
+
     useState("");
+
+
 
   const [role, setRole] =
+
     useState("");
+
+
 
   const [session, setSession] =
+
     useState<SessionDetail | null>(null);
 
+
+
   const [racks, setRacks] =
+
     useState<RackRow[]>([]);
 
+
+
   const [activeRackId, setActiveRackId] =
+
     useState("");
+
+
 
   const [rackSearch, setRackSearch] =
+
     useState("");
+
+
 
   const [lines, setLines] =
+
     useState<CountLine[]>([]);
 
+
+
   const [lineSearch, setLineSearch] =
+
     useState("");
 
+
+
   const [draftCounts, setDraftCounts] =
+
     useState<Record<string, string>>({});
 
+
+
   const [savingLineId, setSavingLineId] =
+
     useState<string | null>(null);
+
+
 
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
+
+
   const [lastSavedLineId, setLastSavedLineId] =
+
     useState<string | null>(null);
+
+
 
   const [loading, setLoading] =
+
     useState(true);
 
+
+
   const [loadingLines, setLoadingLines] =
+
     useState(false);
+
+
 
   const [submitting, setSubmitting] =
+
     useState(false);
+
+
 
   const [errorMessage, setErrorMessage] =
+
     useState("");
+
+
 
   const [varianceStatus, setVarianceStatus] =
+
     useState<VarianceStatus | null>(null);
 
+
+
   const [showAddSku, setShowAddSku] =
+
     useState(false);
+
+
 
   const [skuSearch, setSkuSearch] =
+
     useState("");
 
+
+
   const [skuResults, setSkuResults] =
+
     useState<SearchSkuRow[]>([]);
 
+
+
   const [searchingSku, setSearchingSku] =
+
     useState(false);
 
+
+
   const [addingVariantId, setAddingVariantId] =
+
     useState<string | null>(null);
 
+
+
   const canCount =
+
     EDIT_ROLES.includes(role) &&
+
     !!session &&
+
     (session.opname_type === "cycle_count" || role !== "warehouse_staff") &&
+
     ["draft", "counting"].includes(
+
       session.status
+
     );
+
+
 
   const isCycleCount = session?.opname_type === "cycle_count";
 
+
+
   const activeRack =
+
     racks.find(
+
       (item) =>
+
         item.location_id === activeRackId
+
     ) ?? null;
 
+
+
   const filteredRacks =
+
     useMemo(() => {
+
       const keyword =
+
         rackSearch.trim().toLowerCase();
 
+
+
       if (!keyword) {
+
         return racks;
+
       }
+
+
 
       return racks.filter((item) =>
+
         [
+
           item.location_code,
+
           item.location_name,
+
           item.area_code,
+
           item.area_name,
+
         ]
+
           .join(" ")
+
           .toLowerCase()
+
           .includes(keyword)
+
       );
+
     }, [racks, rackSearch]);
 
+
+
   const loadSummary = useCallback(
+
     async (id: string) => {
+
       const [
+
         sessionResult,
+
         racksResult,
+
       ] = await Promise.all([
-        supabase.rpc(
-          "get_stock_opname_session_detail",
-          {
-            p_session_id: id,
-          }
-        ),
 
         supabase.rpc(
-          "get_stock_opname_racks",
+
+          "get_stock_opname_session_detail",
+
           {
+
             p_session_id: id,
+
           }
+
         ),
+
+
+
+        supabase.rpc(
+
+          "get_stock_opname_racks",
+
+          {
+
+            p_session_id: id,
+
+          }
+
+        ),
+
       ]);
 
+
+
       if (sessionResult.error) {
+
         throw sessionResult.error;
+
       }
+
+
 
       if (racksResult.error) {
+
         throw racksResult.error;
+
       }
+
+
 
       const sessionRow =
+
         ((sessionResult.data ??
+
           [])[0] as
+
           | SessionDetail
+
           | undefined) ?? null;
 
+
+
       const rackRows =
+
         (racksResult.data ??
+
           []) as RackRow[];
 
+
+
       if (sessionRow?.opname_type === "cycle_count") {
+
         const { data: statusData, error: statusError } = await supabase.rpc(
+
           "get_cycle_count_variance_status", { p_session_id: id }
+
         );
+
         if (statusError) throw statusError;
+
         setVarianceStatus((statusData ?? [])[0] as VarianceStatus ?? null);
+
       } else {
+
         setVarianceStatus(null);
+
       }
+
+
 
       setSession(sessionRow);
+
       setRacks(rackRows);
 
+
+
       return {
+
         sessionRow,
+
         rackRows,
+
       };
+
     },
+
     [supabase]
+
   );
+
+
 
   const loadLines = useCallback(
+
     async (
+
       id: string,
+
       locationId: string,
+
       search = ""
+
     ) => {
+
       setLoadingLines(true);
+
       setErrorMessage("");
 
+
+
       const { data, error } =
+
         await supabase.rpc(
+
           "get_stock_opname_lines_by_rack",
+
           {
+
             p_session_id: id,
+
             p_location_id:
+
               locationId,
+
             p_search:
+
               search.trim() ||
+
               null,
+
             p_limit: 500,
+
             p_offset: 0,
+
           }
+
         );
+
+
 
       if (error) {
+
         setLines([]);
+
         setDraftCounts({});
+
         setErrorMessage(
+
           error.message
+
         );
+
         setLoadingLines(false);
+
         return;
+
       }
+
+
 
       let rows = (data ?? []) as CountLine[];
+
       if (rows.length > 0) {
+
         const { data: reasonData, error: reasonError } = await supabase.rpc(
+
           "get_cycle_count_line_reasons", { p_line_ids: rows.map((row) => row.line_id) }
+
         );
+
         if (reasonError) {
+
           setErrorMessage(reasonError.message);
+
           setLoadingLines(false);
+
           return;
+
         }
+
         const reasons = new Map(
+
           ((reasonData ?? []) as CountLine[]).map((row) => [row.line_id, row])
+
         );
+
         rows = rows.map((row) => ({ ...row, ...reasons.get(row.line_id) }));
+
       }
+
+
 
       const nextDrafts:
+
         Record<string, string> = {};
 
+
+
       for (const row of rows) {
+
         nextDrafts[row.line_id] =
+
           row.counted_qty === null
+
             ? ""
+
             : String(
+
                 row.counted_qty
+
               );
+
       }
+
+
 
       setLines(rows);
+
       setDraftCounts(nextDrafts);
+
       setLoadingLines(false);
+
     },
+
     [supabase]
+
   );
 
+
+
   useEffect(() => {
+
     const params =
+
       new URLSearchParams(
+
         window.location.search
+
       );
 
+
+
     const id =
+
       params.get("session") ?? "";
 
+
+
     async function init() {
+
       if (!id) {
+
         setErrorMessage("Session Stock Opname tidak ditemukan.");
+
         setLoading(false);
+
         return;
+
       }
+
       setSessionId(id);
+
       try {
+
         const {
+
           data: { user },
+
         } =
+
           await supabase.auth.getUser();
 
+
+
         if (!user) {
+
           router.replace(
+
             "/login"
+
           );
+
           return;
+
         }
+
+
 
         const {
+
           data: profile,
+
           error: profileError,
+
         } = await supabase
+
           .from("profiles")
+
           .select(
+
             "role, is_active"
+
           )
+
           .eq("id", user.id)
+
           .single();
 
+
+
         if (
+
           profileError ||
+
           !profile ||
+
           profile.is_active !== true
+
         ) {
+
           await supabase.auth.signOut();
 
+
+
           router.replace(
+
             "/login"
+
           );
 
+
+
           return;
+
         }
+
+
 
         setRole(profile.role);
 
+
+
         const {
+
           rackRows,
+
         } =
+
           await loadSummary(id);
 
+
+
         const firstRack =
+
           rackRows.find(
+
             (item) =>
+
               item.total_lines >
+
                 0 &&
+
               !item.is_complete
+
           ) ??
+
           rackRows.find(
+
             (item) =>
+
               item.total_lines >
+
               0
+
           ) ??
+
           rackRows[0] ??
+
           null;
 
+
+
         if (firstRack) {
+
           setActiveRackId(
+
             firstRack.location_id
+
           );
+
+
 
           await loadLines(
+
             id,
+
             firstRack.location_id
+
           );
+
         }
 
+
+
         setLoading(false);
+
       } catch (error) {
+
         setErrorMessage(
+
           error instanceof Error
+
             ? error.message
+
             : "Gagal membuka Stock Opname."
+
         );
 
+
+
         setLoading(false);
+
       }
+
     }
 
+
+
     void Promise.resolve().then(init);
+
   }, [
+
     loadLines,
+
     loadSummary,
+
     router,
+
     supabase,
+
   ]);
 
+
+
   async function selectRack(
+
     rackId: string
+
   ) {
+
     if (!sessionId) return;
 
+
+
     setActiveRackId(rackId);
+
     setLineSearch("");
+
     setShowAddSku(false);
+
     setSkuSearch("");
+
     setSkuResults([]);
 
+
+
     await loadLines(
+
       sessionId,
+
       rackId
+
     );
+
   }
 
+
+
   async function saveCount(
+
     line: CountLine,
+
     rawOverride?: string
+
   ) {
+
     const run = async () => {
+
       if (!canCount) {
+
         return;
+
       }
+
+
 
       const raw =
+
         rawOverride ??
+
         draftCounts[line.line_id] ??
+
         "";
 
+
+
       if (raw.trim() === "") {
+
         return;
+
       }
+
+
 
       const qty = Number(raw);
 
-      if (
-        !Number.isInteger(qty) ||
-        qty < 0
-      ) {
-        setErrorMessage(
-          `Qty fisik ${line.sku} harus angka bulat 0 atau lebih.`
-        );
-        return;
-      }
+
 
       if (
-        line.counted_qty !== null &&
-        Number(line.counted_qty) === qty
+
+        !Number.isInteger(qty) ||
+
+        qty < 0
+
       ) {
+
+        setErrorMessage(
+
+          `Qty fisik ${line.sku} harus angka bulat 0 atau lebih.`
+
+        );
+
         return;
+
       }
+
+
+
+      if (
+
+        line.counted_qty !== null &&
+
+        Number(line.counted_qty) === qty
+
+      ) {
+
+        return;
+
+      }
+
+
 
       setErrorMessage("");
+
       setSavingLineId(line.line_id);
 
+
+
       const wasCounted =
+
         line.counted_qty !== null;
 
+
+
       try {
+
         const { error } =
+
           await supabase.rpc(
+
             "save_stock_opname_count",
+
             {
+
               p_session_id: sessionId,
+
               p_variant_id: line.variant_id,
+
               p_location_id: line.location_id,
+
               p_counted_qty: qty,
+
             }
+
           );
+
+
 
         if (error) {
+
           setErrorMessage(error.message);
+
           return;
+
         }
+
+
 
         setLines((current) =>
+
           current.map((item) =>
+
             item.line_id === line.line_id
+
               ? {
+
                   ...item,
+
                   counted_qty: qty,
+
                   recount_qty: null,
+
                   variance_reason_category: null,
+
                   investigation_notes: null,
+
                 }
+
               : item
+
           )
+
         );
 
+
+
         if (!wasCounted) {
+
           setSession((current) =>
+
             current
+
               ? {
+
                   ...current,
+
                   status:
+
                     current.status === "draft"
+
                       ? "counting"
+
                       : current.status,
+
                   counted_lines:
+
                     Number(current.counted_lines) + 1,
+
                   progress_percent:
+
                     current.total_lines > 0
+
                       ? Math.round(
+
                           ((Number(current.counted_lines) + 1) /
+
                             Number(current.total_lines)) *
+
                             1000
+
                         ) / 10
+
                       : 0,
+
                 }
+
               : current
+
           );
+
+
 
           setRacks((current) =>
+
             current.map((rack) => {
+
               if (rack.location_id !== line.location_id) {
+
                 return rack;
+
               }
 
+
+
               const counted =
+
                 Number(rack.counted_lines) + 1;
 
+
+
               return {
+
                 ...rack,
+
                 counted_lines: counted,
+
                 progress_percent:
+
                   rack.total_lines > 0
+
                     ? Math.round(
+
                         (counted / Number(rack.total_lines)) * 1000
+
                       ) / 10
+
                     : 0,
+
                 is_complete:
+
                   rack.total_lines > 0 &&
+
                   counted >= Number(rack.total_lines),
+
               };
+
             })
+
           );
+
         }
+
+
 
         setLastSavedLineId(line.line_id);
 
+
+
         if (session?.opname_type === "cycle_count") {
+
           const { data: statusData } = await supabase.rpc(
+
             "get_cycle_count_variance_status",
+
             { p_session_id: sessionId }
+
           );
+
           setVarianceStatus(
+
             (statusData ?? [])[0] as VarianceStatus ?? null
+
           );
+
         }
+
       } catch (error) {
+
         setErrorMessage(
+
           error instanceof Error
+
             ? error.message
+
             : "Gagal menyimpan Qty fisik."
+
         );
+
       } finally {
+
         setSavingLineId(null);
+
       }
 
+
+
       window.setTimeout(() => {
+
         setLastSavedLineId((current) =>
+
           current === line.line_id ? null : current
+
         );
+
       }, 1200);
+
     };
 
+
+
     const queued = saveQueueRef.current.then(run, run);
+
     saveQueueRef.current = queued.catch(() => undefined);
+
     await queued;
+
   }
 
+
+
   function handleCountKeyDown(
+
     event: KeyboardEvent<HTMLInputElement>
+
   ) {
+
     if (event.key !== "Enter") {
+
       return;
+
     }
+
+
 
     event.preventDefault();
 
+
+
     const current =
+
       event.currentTarget;
+
+
 
     current.blur();
 
+
+
     window.setTimeout(() => {
+
       const inputs =
+
         Array.from(
+
           document.querySelectorAll<HTMLInputElement>(
+
             '[data-count-input="true"]:not(:disabled)'
+
           )
+
         ).filter((input) => {
+
           const rect = input.getBoundingClientRect();
+
           const style = window.getComputedStyle(input);
+
           return (
+
             rect.width > 0 &&
+
             rect.height > 0 &&
+
             style.display !== "none" &&
+
             style.visibility !== "hidden"
+
           );
+
         });
 
+
+
       const index =
+
         inputs.indexOf(
+
           current
+
         );
+
+
 
       if (
+
         index >= 0 &&
+
         index <
+
           inputs.length - 1
+
       ) {
+
         inputs[
+
           index + 1
+
         ].focus();
 
+
+
         inputs[
+
           index + 1
+
         ].select();
+
       }
+
     }, 100);
+
   }
+
+
 
   async function handleLineSearch(
+
     event: FormEvent<HTMLFormElement>
+
   ) {
+
     event.preventDefault();
 
+
+
     if (
+
       !sessionId ||
+
       !activeRackId
+
     ) {
+
       return;
+
     }
+
+
 
     await loadLines(
+
       sessionId,
+
       activeRackId,
+
       lineSearch
+
     );
+
   }
+
+
 
   async function resetLineSearch() {
+
     setLineSearch("");
 
+
+
     if (
+
       sessionId &&
+
       activeRackId
+
     ) {
+
       await loadLines(
+
         sessionId,
+
         activeRackId
+
       );
+
     }
+
   }
+
+
 
   async function handleSkuSearch(
+
     event: FormEvent<HTMLFormElement>
+
   ) {
+
     event.preventDefault();
 
+
+
     const search =
+
       skuSearch.trim();
 
+
+
     if (!search) {
+
       setSkuResults([]);
+
       return;
+
     }
+
+
 
     setSearchingSku(true);
+
     setErrorMessage("");
+
+
 
     const { data, error } =
+
       await supabase.rpc(
+
         "search_adjustment_skus",
+
         {
+
           p_search: search,
+
           p_limit: 15,
+
         }
+
       );
 
+
+
     if (error) {
+
       setErrorMessage(
+
         error.message
+
       );
+
+
 
       setSkuResults([]);
+
       setSearchingSku(false);
+
       return;
+
     }
+
+
 
     setSkuResults(
+
       (data ??
+
         []) as SearchSkuRow[]
+
     );
+
+
 
     setSearchingSku(false);
+
   }
+
+
 
   async function addSkuToRack(
+
     variantId: string
+
   ) {
+
     if (
+
       !sessionId ||
+
       !activeRackId ||
+
       !canCount
+
     ) {
+
       return;
+
     }
+
+
 
     setAddingVariantId(
+
       variantId
+
     );
 
+
+
     setErrorMessage("");
 
+
+
     const { error } =
+
       await supabase.rpc(
+
         "add_stock_opname_line",
+
         {
+
           p_session_id:
+
             sessionId,
+
           p_variant_id:
+
             variantId,
+
           p_location_id:
+
             activeRackId,
+
         }
+
       );
 
+
+
     if (error) {
+
       setErrorMessage(
+
         error.message
+
       );
+
+
 
       setAddingVariantId(null);
+
       return;
+
     }
+
+
 
     setSkuSearch("");
+
     setSkuResults([]);
+
     setShowAddSku(false);
+
     setAddingVariantId(null);
 
+
+
     try {
+
       await loadSummary(
+
         sessionId
+
       );
+
+
 
       await loadLines(
+
         sessionId,
+
         activeRackId
+
       );
+
     } catch (error) {
+
       setErrorMessage(
+
         error instanceof Error
+
           ? error.message
+
           : "SKU berhasil ditambahkan, tetapi refresh gagal."
+
       );
+
     }
+
   }
 
+
+
   async function submitForReview() {
-    if (
-      !session ||
-      !sessionId ||
-      !canCount
-    ) {
-      return;
-    }
 
     if (
-      Number(
-        session.counted_lines
-      ) !==
-      Number(
-        session.total_lines
-      )
+
+      !session ||
+
+      !sessionId ||
+
+      !canCount
+
     ) {
+
+      return;
+
+    }
+
+
+
+    if (
+
+      Number(
+
+        session.counted_lines
+
+      ) !==
+
+      Number(
+
+        session.total_lines
+
+      )
+
+    ) {
+
       setErrorMessage(
+
         "Masih ada SKU yang belum dihitung."
+
       );
 
+
+
       return;
+
     }
+
+
 
     if (session.opname_type === "cycle_count" &&
+
       (Number(varianceStatus?.pending_recount_lines ?? 0) > 0 ||
+
        Number(varianceStatus?.pending_reason_lines ?? 0) > 0)) {
+
       setErrorMessage("Selesaikan Recount dan Alasan Selisih sebelum kirim ke Review.");
+
       return;
+
     }
+
+
 
     const confirmed =
+
       await appConfirm(
+
         [
+
           "Kirim Stock Opname ke Review?",
+
           "",
+
           `Session: ${session.session_code}`,
+
           `SKU dihitung: ${formatNumber(
+
             session.counted_lines
+
           )}`,
+
           "",
+
           "Setelah dikirim, first count tidak dapat diedit lagi.",
+
         ].join("\n")
+
       );
+
+
 
     if (!confirmed) {
+
       return;
+
     }
+
+
 
     setSubmitting(true);
+
     setErrorMessage("");
 
+
+
     const { error } =
+
       await supabase.rpc(
+
         "submit_stock_opname",
+
         {
+
           p_session_id:
+
             sessionId,
+
         }
+
       );
+
+
 
     if (error) {
+
       setErrorMessage(
+
         error.message
+
       );
+
+
 
       setSubmitting(false);
+
       return;
+
     }
+
+
 
     try {
+
       await loadSummary(
+
         sessionId
+
       );
 
+
+
       if (activeRackId) {
+
         await loadLines(
+
           sessionId,
+
           activeRackId
+
         );
+
       }
+
     } catch {
+
       // Session already submitted.
+
     }
+
+
 
     setSubmitting(false);
 
+
+
     await appAlert(
+
       [
+
         "Counting Selesai",
+
         "",
+
         "Stock Opname sudah dikirim ke Review.",
+
         "Stok inventory BELUM berubah.",
+
       ].join("\n")
+
     );
+
+
 
     router.replace(
+
       `/stock-opname/review?session=${encodeURIComponent(
+
         sessionId
+
       )}`
+
     );
+
+
 
     router.refresh();
+
   }
+
+
 
   const completedRackCount =
+
     racks.filter(
+
       (rack) =>
+
         Number(rack.total_lines) === 0 ||
+
         Number(rack.counted_lines) >= Number(rack.total_lines)
+
     ).length;
 
+
+
   const allCounted =
+
     !!session &&
+
     Number(
+
       session.total_lines
+
     ) > 0 &&
+
     Number(
+
       session.counted_lines
+
     ) ===
+
       Number(
+
         session.total_lines
+
       );
 
+
+
   const cycleInvestigationComplete =
+
     session?.opname_type !== "cycle_count" ||
+
     (varianceStatus !== null &&
+
       Number(varianceStatus.pending_recount_lines) === 0 &&
+
       Number(varianceStatus.pending_reason_lines) === 0);
 
+
+
   async function refreshInvestigation(locationId: string) {
+
     await loadSummary(sessionId);
+
     await loadLines(sessionId, locationId, lineSearch);
+
   }
+
+
+
+  function handlePrintRack() {
+    if (!session || !activeRack || lines.length === 0) {
+      setErrorMessage("Tidak ada SKU pada rack aktif yang bisa dicetak.");
+      return;
+    }
+
+    const printWindow = window.open(
+      "",
+      "_blank",
+      "width=1200,height=800"
+    );
+
+    if (!printWindow) {
+      setErrorMessage(
+        "Popup print diblokir browser. Izinkan popup untuk halaman WMS lalu coba lagi."
+      );
+      return;
+    }
+
+    const printDate = new Intl.DateTimeFormat("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(new Date());
+
+    const rowsHtml = lines
+      .map((line, index) => {
+        const variant = [line.color, line.size]
+          .filter(Boolean)
+          .join(" / ") || "-";
+
+        return `
+          <tr>
+            <td class="no">${index + 1}</td>
+            <td class="sku">${escapePrintHtml(line.sku)}</td>
+            <td>
+              <div class="product-name">${escapePrintHtml(line.product_name)}</div>
+              <div class="product-code">${escapePrintHtml(line.product_code)}</div>
+            </td>
+            <td>${escapePrintHtml(variant)}</td>
+            <td class="physical"></td>
+            <td></td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Form Stock Opname - ${escapePrintHtml(activeRack.location_code)}</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 10mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      color: #111827;
+      background: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10px;
+    }
+
+    body {
+      padding: 0;
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      font-size: 10px;
+      color: #4b5563;
+    }
+
+    .meta {
+      width: 48%;
+      display: grid;
+      grid-template-columns: 90px 1fr 90px 1fr;
+      gap: 4px 8px;
+      font-size: 10px;
+    }
+
+    .meta-label {
+      font-weight: 700;
+    }
+
+    .meta-value {
+      min-height: 16px;
+      border-bottom: 1px solid #9ca3af;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border: 1px solid #374151;
+      padding: 5px 6px;
+      vertical-align: middle;
+      word-wrap: break-word;
+    }
+
+    th {
+      background: #f3f4f6;
+      text-align: center;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    td {
+      height: 9mm;
+      font-size: 10px;
+    }
+
+    .no {
+      width: 5%;
+      text-align: center;
+    }
+
+    .sku {
+      width: 18%;
+      font-weight: 700;
+    }
+
+    th:nth-child(3),
+    td:nth-child(3) {
+      width: 28%;
+    }
+
+    th:nth-child(4),
+    td:nth-child(4) {
+      width: 18%;
+    }
+
+    .physical {
+      width: 12%;
+      min-height: 9mm;
+    }
+
+    th:nth-child(6),
+    td:nth-child(6) {
+      width: 19%;
+    }
+
+    .product-name {
+      font-weight: 700;
+    }
+
+    .product-code {
+      margin-top: 2px;
+      color: #6b7280;
+      font-size: 8px;
+    }
+
+    thead {
+      display: table-header-group;
+    }
+
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .notes {
+      margin-top: 10px;
+      page-break-inside: avoid;
+    }
+
+    .notes-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .notes-box {
+      height: 22mm;
+      border: 1px solid #374151;
+    }
+
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 50px;
+      margin-top: 12px;
+      page-break-inside: avoid;
+    }
+
+    .signature {
+      text-align: center;
+    }
+
+    .signature-space {
+      height: 22mm;
+    }
+
+    .signature-line {
+      border-bottom: 1px solid #374151;
+      margin: 0 auto 4px;
+      width: 70%;
+    }
+
+    .footer {
+      margin-top: 6px;
+      color: #6b7280;
+      font-size: 8px;
+      text-align: right;
+    }
+
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1 class="title">FORM STOCK OPNAME</h1>
+      <div class="subtitle">${escapePrintHtml(typeLabel(session.opname_type))}</div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-label">Session</div>
+      <div class="meta-value">${escapePrintHtml(session.session_code)}</div>
+
+      <div class="meta-label">Tanggal Count</div>
+      <div class="meta-value">${escapePrintHtml(printDate)}</div>
+
+      <div class="meta-label">Rack</div>
+      <div class="meta-value">${escapePrintHtml(activeRack.location_code)}</div>
+
+      <div class="meta-label">Petugas</div>
+      <div class="meta-value"></div>
+
+      <div class="meta-label">Area</div>
+      <div class="meta-value">${escapePrintHtml(activeRack.area_name)}</div>
+
+      <div class="meta-label">Jumlah SKU</div>
+      <div class="meta-value">${escapePrintHtml(formatNumber(lines.length))}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>No</th>
+        <th>SKU</th>
+        <th>Produk</th>
+        <th>Variant</th>
+        <th>Qty Fisik</th>
+        <th>Catatan</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+
+  <div class="notes">
+    <div class="notes-title">Catatan Umum</div>
+    <div class="notes-box"></div>
+  </div>
+
+  <div class="signatures">
+    <div class="signature">
+      <div>Petugas</div>
+      <div class="signature-space"></div>
+      <div class="signature-line"></div>
+      <div>(Nama / Tanda Tangan)</div>
+    </div>
+
+    <div class="signature">
+      <div>Checker</div>
+      <div class="signature-space"></div>
+      <div class="signature-line"></div>
+      <div>(Nama / Tanda Tangan)</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Dicetak dari Hi.PRIMA WMS · ${escapePrintHtml(new Date().toLocaleString("id-ID"))}
+  </div>
+</body>
+</html>`);
+    printWindow.document.close();
+
+    printWindow.focus();
+    printWindow.onafterprint = () => {
+      printWindow.close();
+    };
+
+    window.setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  }
+
 
   if (loading) {
+
     return (
+
       <div className="min-h-screen bg-slate-50">
+
         <div className="flex min-h-screen">
+
           <Sidebar />
 
+
+
           <main className="flex-1 p-6 md:p-10">
+
             <div className="mx-auto max-w-[1500px] rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+
               Loading Stock Opname...
+
             </div>
+
           </main>
+
         </div>
+
       </div>
+
     );
+
   }
 
+
+
   return (
+
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
+
       <div className="flex min-h-screen w-full max-w-full">
+
         <Sidebar />
 
+
+
         <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 md:p-10 md:pb-28">
+
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
+
             <header className="mb-6">
+
               <p className="text-sm text-slate-500">
+
                 Stock Opname
+
               </p>
 
+
+
               <div className="mt-1 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+
                 <div>
+
                   <div className="flex flex-wrap items-center gap-2">
+
                     <h1 className="text-2xl font-bold sm:text-3xl">
+
                       {session?.session_code ??
+
                         "Counting"}
+
                     </h1>
 
+
+
                     {session && (
+
                       <span className="rounded-lg bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+
                         {statusLabel(
+
                           session.status
+
                         )}
+
                       </span>
+
                     )}
+
                   </div>
+
+
 
                   {session && (
+
                     <p className="mt-2 text-sm text-slate-500">
+
                       {typeLabel(
+
                         session.opname_type
+
                       )}
+
                       {" • "}
+
                       {formatNumber(
+
                         session.counted_lines
+
                       )}
+
                       /
+
                       {formatNumber(
+
                         session.total_lines
+
                       )}{" "}
+
                       SKU selesai
+
                     </p>
+
                   )}
+
                 </div>
+
+
 
                 <Link
+
                   href="/stock-opname"
+
                   className="shrink-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
+
                 >
+
                   Back
+
                 </Link>
+
               </div>
+
             </header>
 
+
+
             {session && (
+
               <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
                   <div>
+
                     <div className="text-sm font-semibold">
+
                       Progress Counting
+
                     </div>
+
+
 
                     <div className="mt-1 text-xs text-slate-500">
+
                       {formatNumber(
+
                         completedRackCount
+
                       )}
+
                       /
+
                       {formatNumber(
+
                         session.total_locations
+
                       )}{" "}
+
                       rack selesai
+
                     </div>
+
                   </div>
+
+
 
                   <div className="text-2xl font-bold">
+
                     {Number(
+
                       session.progress_percent ??
+
                         0
+
                     )}
+
                     %
+
                   </div>
+
                 </div>
+
+
 
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+
                   <div
+
                     className="h-full rounded-full bg-slate-900 transition-all"
+
                     style={{
+
                       width: `${Math.min(
+
                         Number(
+
                           session.progress_percent ??
+
                             0
+
                         ),
+
                         100
+
                       )}%`,
+
                     }}
+
                   />
+
                 </div>
 
+
+
               </section>
+
             )}
+
+
 
             {errorMessage && (
+
               <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+
                 {errorMessage}
+
               </div>
+
             )}
 
+
+
             {session &&
+
               session.status ===
+
                 "review" && (
+
                 <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 p-5">
+
                   <div className="font-semibold text-blue-900">
+
                     Counting sudah selesai
+
                   </div>
+
+
 
                   <p className="mt-1 text-sm text-blue-800">
+
                     Session ini sudah masuk tahap Review.
+
                     Inventory belum berubah.
+
                   </p>
+
                 </div>
+
               )}
 
+
+
             <div className="grid min-w-0 gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+
               <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
                 <div className="border-b border-slate-200 p-4">
+
                   <div className="font-semibold">
+
                     Rack
+
                   </div>
+
+
 
                   <input
+
                     value={rackSearch}
+
                     onChange={(event) =>
+
                       setRackSearch(
+
                         event.target.value
+
                       )
+
                     }
+
                     placeholder="Cari rack..."
+
                     className="mt-3 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+
                   />
+
                 </div>
+
+
 
                 <div className="hidden max-h-[60vh] overflow-y-auto lg:block">
+
                   {filteredRacks.map(
+
                     (rack) => {
+
                       const active =
+
                         rack.location_id ===
+
                         activeRackId;
 
+
+
                       return (
+
                         <button
+
                           key={
+
                             rack.location_id
+
                           }
+
                           type="button"
+
                           onClick={() =>
+
                             selectRack(
+
                               rack.location_id
+
                             )
+
                           }
+
                           className={
+
                             active
+
                               ? "flex w-full items-center justify-between gap-3 border-b border-slate-100 bg-slate-900 p-4 text-left text-white"
+
                               : "flex w-full items-center justify-between gap-3 border-b border-slate-100 p-4 text-left hover:bg-slate-50"
+
                           }
+
                         >
+
                           <div className="min-w-0">
+
                             <div className="font-semibold">
+
                               {
+
                                 rack.location_code
+
                               }
+
                             </div>
+
+
 
                             <div
+
                               className={
+
                                 active
+
                                   ? "mt-1 truncate text-xs text-slate-300"
+
                                   : "mt-1 truncate text-xs text-slate-500"
+
                               }
+
                             >
+
                               {
+
                                 rack.area_name
+
                               }
+
                             </div>
+
                           </div>
+
+
 
                           <div className="shrink-0 text-right">
+
                             <div className="text-xs font-semibold">
+
                               {Number(rack.total_lines) === 0 ||
+
                               Number(rack.counted_lines) >= Number(rack.total_lines)
+
                                 ? "✓ Selesai"
+
                                 : `${formatNumber(
+
                                     rack.counted_lines
+
                                   )}/${formatNumber(
+
                                     rack.total_lines
+
                                   )}`}
+
                             </div>
+
                           </div>
+
                         </button>
+
                       );
+
                     }
+
                   )}
+
                 </div>
+
+
 
                 <div className="p-4 lg:hidden">
+
                   <select
+
                     value={activeRackId}
+
                     onChange={(event) =>
+
                       selectRack(
+
                         event.target
+
                           .value
+
                       )
+
                     }
+
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
+
                   >
+
                     {filteredRacks.map(
+
                       (rack) => (
+
                         <option
+
                           key={
+
                             rack.location_id
+
                           }
+
                           value={
+
                             rack.location_id
+
                           }
+
                         >
+
                           {
+
                             rack.location_code
+
                           }{" "}
+
                           —{" "}
+
                           {Number(rack.total_lines) === 0 ||
+
                           Number(rack.counted_lines) >= Number(rack.total_lines)
+
                             ? "✓ Selesai"
+
                             : `${rack.counted_lines}/${rack.total_lines}`}
+
                         </option>
+
                       )
+
                     )}
+
                   </select>
+
                 </div>
+
               </section>
 
+
+
               <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
                 {!activeRack ? (
+
                   <div className="p-10 text-center text-sm text-slate-500">
+
                     Pilih rack untuk mulai counting.
+
                   </div>
+
                 ) : (
+
                   <>
+
                     <div className="border-b border-slate-200 p-4 sm:p-5">
+
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+
                         <div>
+
                           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+
                             Rack Aktif
+
                           </div>
 
+
+
                           <h2 className="mt-1 text-xl font-bold">
+
                             {
+
                               activeRack.location_code
+
                             }
+
                           </h2>
 
+
+
                           <p className="mt-1 text-sm text-slate-500">
+
                             {
+
                               activeRack.area_name
+
                             }
+
                             {" • "}
+
                             {formatNumber(
+
                               activeRack.counted_lines
+
                             )}
+
                             /
+
                             {formatNumber(
+
                               activeRack.total_lines
+
                             )}{" "}
+
                             SKU
+
                           </p>
+
                         </div>
+
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handlePrintRack}
+                          disabled={lines.length === 0}
+                          className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Print Form
+                        </button>
 
                         {canCount && (
                           <button
                             type="button"
                             onClick={() =>
                               setShowAddSku(
-                                (value) =>
-                                  !value
+                                (value) => !value
                               )
                             }
                             className="shrink-0 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold"
@@ -1285,504 +2900,1008 @@ export default function StockOpnameCountingPage() {
                         )}
                       </div>
 
+                      </div>
+
+
+
                       <form
+
                         onSubmit={
+
                           handleLineSearch
+
                         }
+
                         className="mt-4 flex min-w-0 flex-col gap-2 sm:flex-row"
+
                       >
+
                         <input
+
                           value={
+
                             lineSearch
+
                           }
+
                           onChange={(
+
                             event
+
                           ) =>
+
                             setLineSearch(
+
                               event.target
+
                                 .value
+
                             )
+
                           }
+
                           placeholder="Cari SKU / produk..."
+
                           className="h-11 min-w-0 flex-1 rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-slate-500"
+
                         />
 
+
+
                         <button
+
                           type="submit"
+
                           className="shrink-0 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"
+
                         >
+
                           Search
+
                         </button>
 
+
+
                         {lineSearch && (
+
                           <button
+
                             type="button"
+
                             onClick={
+
                               resetLineSearch
+
                             }
+
                             className="shrink-0 rounded-xl border border-slate-300 px-4 py-2.5 text-sm"
+
                           >
+
                             Reset
+
                           </button>
+
                         )}
+
                       </form>
 
+
+
                       {showAddSku &&
+
                         canCount && (
+
                           <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+
                             <div className="font-semibold">
+
                               Barang fisik tidak ada di daftar?
+
                             </div>
 
+
+
                             <p className="mt-1 text-xs text-slate-500">
+
                               Cari SKU lalu tambahkan ke rack ini.
+
                             </p>
 
+
+
                             <form
+
                               onSubmit={
+
                                 handleSkuSearch
+
                               }
+
                               className="mt-3 flex flex-col gap-2 sm:flex-row"
+
                             >
+
                               <input
+
                                 value={
+
                                   skuSearch
+
                                 }
+
                                 onChange={(
+
                                   event
+
                                 ) =>
+
                                   setSkuSearch(
+
                                     event
+
                                       .target
+
                                       .value
+
                                   )
+
                                 }
+
                                 placeholder="Cari SKU..."
+
                                 className="h-10 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-sm"
+
                               />
 
+
+
                               <button
+
                                 type="submit"
+
                                 disabled={
+
                                   searchingSku
+
                                 }
+
                                 className="shrink-0 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+
                               >
+
                                 {searchingSku
+
                                   ? "Searching..."
+
                                   : "Cari"}
+
                               </button>
+
                             </form>
 
+
+
                             {skuResults.length >
+
                               0 && (
+
                               <div className="mt-3 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+
                                 {skuResults.map(
+
                                   (
+
                                     item
+
                                   ) => (
+
                                     <div
+
                                       key={
+
                                         item.variant_id
+
                                       }
+
                                       className="flex flex-col gap-3 border-b border-slate-100 p-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
+
                                     >
+
                                       <div className="min-w-0">
+
                                         <div className="font-semibold">
+
                                           {
+
                                             item.sku
+
                                           }
+
                                         </div>
+
+
 
                                         <div className="mt-1 truncate text-xs text-slate-500">
+
                                           {
+
                                             item.product_name
+
                                           }
+
                                           {item.color
+
                                             ? ` • ${item.color}`
+
                                             : ""}
+
                                           {item.size
+
                                             ? ` • ${item.size}`
+
                                             : ""}
+
                                         </div>
+
                                       </div>
+
+
 
                                       <button
+
                                         type="button"
+
                                         disabled={
+
                                           addingVariantId ===
+
                                           item.variant_id
+
                                         }
+
                                         onClick={() =>
+
                                           addSkuToRack(
+
                                             item.variant_id
+
                                           )
+
                                         }
+
                                         className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold disabled:opacity-50"
+
                                       >
+
                                         {addingVariantId ===
+
                                         item.variant_id
+
                                           ? "Adding..."
+
                                           : "Tambah"}
+
                                       </button>
+
                                     </div>
+
                                   )
+
                                 )}
+
                               </div>
+
                             )}
+
                           </div>
+
                         )}
+
                     </div>
+
+
 
                     {loadingLines ? (
+
                       <div className="p-10 text-center text-sm text-slate-500">
+
                         Loading SKU...
+
                       </div>
+
                     ) : lines.length ===
+
                       0 ? (
+
                       <div className="p-10 text-center">
+
                         <div className="font-semibold">
+
                           Tidak ada SKU
+
                         </div>
+
+
 
                         <p className="mt-2 text-sm text-slate-500">
+
                           Rack ini kosong atau hasil pencarian tidak ditemukan.
+
                         </p>
+
                       </div>
+
                     ) : (
+
                       <>
+
                         <div className={isCycleCount
+
                           ? "hidden max-h-[53vh] overflow-y-auto overflow-x-hidden md:block"
+
                           : "hidden max-h-[53vh] overflow-auto md:block"}>
+
                           <table className={isCycleCount
+
                             ? "w-full table-fixed text-left text-sm"
+
                             : "w-full min-w-[760px] text-left text-sm"}>
+
                             <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
+
                               <tr>
+
                                 <th className={isCycleCount ? "w-[19%] px-3 py-4" : "px-5 py-4"}>
+
                                   SKU
+
                                 </th>
+
+
 
                                 <th className={isCycleCount ? "w-[38%] px-3 py-4" : "px-5 py-4"}>
+
                                   Produk
+
                                 </th>
+
+
 
                                 <th className={isCycleCount ? "w-[22%] px-3 py-4" : "px-5 py-4"}>
+
                                   Variant
+
                                 </th>
+
+
 
                                 <th className={isCycleCount ? "w-[21%] px-3 py-4 text-center" : "w-44 px-5 py-4 text-center"}>
+
                                   Fisik
+
                                 </th>
+
                               </tr>
+
                             </thead>
 
+
+
                             <tbody className="divide-y divide-slate-100">
+
                               {lines.map(
+
                                 (
+
                                   line
+
                                 ) => (
+
                                   <Fragment key={line.line_id}>
+
                                   <tr
+
                                   >
+
                                     <td className={isCycleCount ? "break-all px-3 py-4 font-semibold" : "px-5 py-4 font-semibold"}>
+
                                       {
+
                                         line.sku
+
                                       }
+
                                     </td>
+
+
 
                                     <td className={isCycleCount ? "break-words px-3 py-4" : "px-5 py-4"}>
+
                                       <div className="font-medium">
+
                                         {
+
                                           line.product_name
+
                                         }
+
                                       </div>
+
+
 
                                       <div className="mt-1 text-xs text-slate-500">
+
                                         {
+
                                           line.product_code
+
                                         }
+
                                       </div>
+
                                     </td>
+
+
 
                                     <td className={isCycleCount ? "break-words px-3 py-4 text-slate-600" : "px-5 py-4 text-slate-600"}>
+
                                       {[
+
                                         line.color,
+
                                         line.size,
+
                                       ]
+
                                         .filter(
+
                                           Boolean
+
                                         )
+
                                         .join(
+
                                           " / "
+
                                         ) ||
+
                                         "-"}
+
                                     </td>
+
+
 
                                     <td className="px-5 py-3">
+
                                       <div className="relative flex min-h-11 items-center justify-center">
+
                                         <input
+
                                           data-count-input="true"
+
                                           type="number"
+
                                           min="0"
+
                                           step="1"
+
                                           inputMode="numeric"
+
                                           disabled={
+
                                             !canCount
+
                                           }
+
                                           value={
+
                                             draftCounts[
+
                                               line
+
                                                 .line_id
+
                                             ] ??
+
                                             ""
+
                                           }
+
                                           onFocus={(
+
                                             event
+
                                           ) =>
+
                                             event.currentTarget.select()
+
                                           }
+
                                           onChange={(
+
                                             event
+
                                           ) =>
+
                                             setDraftCounts(
+
                                               (
+
                                                 current
+
                                               ) => ({
+
                                                 ...current,
+
                                                 [line.line_id]:
+
                                                   event
+
                                                     .target
+
                                                     .value,
+
                                               })
+
                                             )
+
                                           }
+
                                           onBlur={(event) =>
+
                                             saveCount(
+
                                               line,
+
                                               event.currentTarget.value
+
                                             )
+
                                           }
+
                                           onKeyDown={
+
                                             handleCountKeyDown
+
                                           }
+
                                           placeholder="0"
+
                                           className="h-11 w-24 rounded-xl border border-slate-300 px-3 text-center text-base font-bold outline-none focus:border-slate-900 disabled:bg-slate-50"
+
                                         />
 
+
+
                                         <div className="absolute right-0 top-1/2 -translate-y-1/2 whitespace-nowrap text-xs">
+
                                           {savingLineId ===
+
                                           line.line_id ? (
+
                                             <span className="text-slate-400">
+
                                               Saving
+
                                             </span>
+
                                           ) : lastSavedLineId ===
+
                                             line.line_id ? (
+
                                             <span className="font-semibold text-emerald-600">
+
                                               ✓
+
                                             </span>
+
                                           ) : line.counted_qty !==
+
                                             null ? (
+
                                             <span className="font-semibold text-emerald-600">
+
                                               ✓
+
                                             </span>
+
                                           ) : null}
+
                                         </div>
+
                                       </div>
+
                                     </td>
+
                                   </tr>
+
                                   {session?.opname_type === "cycle_count" &&
+
                                     line.counted_qty !== null &&
+
                                     (line.counted_qty !== line.system_qty ||
+
                                       (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+
                                     <tr><td colSpan={4} className="px-3 pb-4">
+
                                       <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+
                                         editable={canCount} onChanged={() => refreshInvestigation(line.location_id)} />
+
                                     </td></tr>
+
                                   )}
+
                                   </Fragment>
+
                                 )
+
                               )}
+
                             </tbody>
+
                           </table>
+
                         </div>
+
+
 
                         <div className="max-h-[53vh] space-y-3 overflow-y-auto p-3 md:hidden">
+
                           {lines.map(
+
                             (
+
                               line
+
                             ) => (
+
                               <div
+
                                 key={
+
                                   line.line_id
+
                                 }
+
                                 className="rounded-xl border border-slate-200 p-4"
+
                               >
+
                                 <div className="font-semibold">
+
                                   {
+
                                     line.sku
+
                                   }
+
                                 </div>
+
+
 
                                 <div className="mt-1 text-sm">
+
                                   {
+
                                     line.product_name
+
                                   }
+
                                 </div>
+
+
 
                                 <div className="mt-1 text-xs text-slate-500">
+
                                   {[
+
                                     line.color,
+
                                     line.size,
+
                                   ]
+
                                     .filter(
+
                                       Boolean
+
                                     )
+
                                     .join(
+
                                       " / "
+
                                     ) ||
+
                                     "-"}
+
                                 </div>
+
+
 
                                 <div className="mt-4 flex items-center gap-3">
+
                                   <label className="text-xs font-semibold text-slate-500">
+
                                     Fisik
+
                                   </label>
 
+
+
                                   <input
+
                                     data-count-input="true"
+
                                     type="number"
+
                                     min="0"
+
                                     step="1"
+
                                     inputMode="numeric"
+
                                     disabled={
+
                                       !canCount
+
                                     }
+
                                     value={
+
                                       draftCounts[
+
                                         line
+
                                           .line_id
+
                                       ] ?? ""
+
                                     }
+
                                     onFocus={(
+
                                       event
+
                                     ) =>
+
                                       event.currentTarget.select()
+
                                     }
+
                                     onChange={(
+
                                       event
+
                                     ) =>
+
                                       setDraftCounts(
+
                                         (
+
                                           current
+
                                         ) => ({
+
                                           ...current,
+
                                           [line.line_id]:
+
                                             event
+
                                               .target
+
                                               .value,
+
                                         })
+
                                       )
+
                                     }
+
                                     onBlur={(event) =>
+
                                       saveCount(
+
                                         line,
+
                                         event.currentTarget.value
+
                                       )
+
                                     }
+
                                     onKeyDown={
+
                                       handleCountKeyDown
+
                                     }
+
                                     placeholder="0"
+
                                     className="h-12 w-28 rounded-xl border border-slate-300 px-3 text-right text-lg font-bold outline-none focus:border-slate-900 disabled:bg-slate-50"
+
                                   />
 
+
+
                                   {savingLineId ===
+
                                   line.line_id ? (
+
                                     <span className="text-xs text-slate-400">
+
                                       Saving...
+
                                     </span>
+
                                   ) : line.counted_qty !==
+
                                     null ? (
+
                                     <span className="text-sm font-semibold text-emerald-600">
+
                                       ✓ Saved
+
                                     </span>
+
                                   ) : null}
+
                                   </div>
+
                                   {session?.opname_type === "cycle_count" &&
+
                                     line.counted_qty !== null &&
+
                                     (line.counted_qty !== line.system_qty ||
+
                                       (line.recount_qty !== null && line.recount_qty !== line.system_qty)) && (
+
                                     <div className="mt-4">
+
                                       <CycleCountVarianceEditor key={`${line.line_id}:${line.counted_qty}:${line.recount_qty}:${line.variance_reason_category}:${line.investigation_notes}`} line={line} sessionId={sessionId}
+
                                         editable={canCount} onChanged={() => refreshInvestigation(line.location_id)} />
+
                                     </div>
+
                                   )}
+
                                 </div>
+
                             )
+
                           )}
+
                         </div>
+
                       </>
+
                     )}
+
                   </>
+
                 )}
+
               </section>
+
             </div>
 
+
+
             {session &&
+
               ["draft", "counting"].includes(
+
                 session.status
+
               ) &&
+
               canCount && (
+
                 <div className="sticky bottom-3 z-20 mt-5 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur">
+
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
                     <div>
+
                       <div className="text-sm font-semibold">
+
                         {allCounted && !cycleInvestigationComplete
+
                           ? `${formatNumber(Number(varianceStatus?.pending_recount_lines ?? 0))} perlu Recount · ${formatNumber(Number(varianceStatus?.pending_reason_lines ?? 0))} perlu Alasan Selisih`
+
                           : allCounted
+
                           ? "Semua SKU sudah dihitung ✓"
+
                           : `${formatNumber(
+
                               Number(
+
                                 session.total_lines
+
                               ) -
+
                                 Number(
+
                                   session.counted_lines
+
                                 )
+
                             )} SKU belum dihitung`}
+
                       </div>
 
+
+
                       <p className="mt-1 text-xs text-slate-500">
+
                         {session.opname_type === "cycle_count"
+
                           ? "SKU yang berbeda dari system wajib Recount. Jika masih selisih, isi alasan dan catatan sebelum Review."
+
                           : "Qty sistem dan selisih baru akan terlihat pada tahap Review."}
+
                       </p>
+
                     </div>
 
+
+
                     <button
+
                       type="button"
+
                       onClick={
+
                         submitForReview
+
                       }
+
                       disabled={
+
                         !allCounted ||
+
                         !cycleInvestigationComplete ||
+
                         submitting ||
+
                         savingLineId !==
+
                           null
+
                       }
+
                       className="shrink-0 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+
                     >
+
                       {submitting
+
                         ? "Submitting..."
+
                         : "Kirim ke Review"}
+
                     </button>
+
                   </div>
+
                 </div>
+
               )}
+
           </div>
+
         </main>
+
       </div>
+
     </div>
+
   );
+
 }
