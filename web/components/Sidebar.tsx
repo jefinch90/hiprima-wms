@@ -174,7 +174,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-4">
           {navItems
             .filter(
               (item) => item.visible
@@ -230,7 +230,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="hidden min-h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col overflow-hidden border-r border-slate-200 bg-white lg:flex">
         <MenuContent />
       </aside>
 
@@ -256,7 +256,7 @@ export default function Sidebar() {
             className="absolute inset-0 bg-black/40"
           />
 
-          <aside className="relative z-10 flex h-full w-[min(82vw,300px)] flex-col bg-white shadow-2xl">
+          <aside className="relative z-10 flex h-dvh min-h-0 w-[min(82vw,300px)] flex-col overflow-hidden bg-white shadow-2xl">
             <div className="absolute right-3 top-3 z-20">
               <button
                 type="button"

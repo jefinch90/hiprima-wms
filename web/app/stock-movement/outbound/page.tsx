@@ -33,9 +33,18 @@ type SourceLocationRow = {
   qty_on_hand: number;
 };
 
+type TransactionType =
+  | "sale"
+  | "sample"
+  | "giveaway"
+  | "internal_use"
+  | "other";
+
 type OutboundResult = {
   new_movement_no: number | string;
   source_qty_after: number | string;
+  transaction_type?: string | null;
+  sales_channel?: string | null;
 };
 
 export default function OutboundStockPage() {
@@ -57,6 +66,9 @@ export default function OutboundStockPage() {
   const [selectedSource, setSelectedSource] =
     useState<SourceLocationRow | null>(null);
 
+  const [transactionType, setTransactionType] =
+    useState<TransactionType | "">("");
+  const [salesChannel, setSalesChannel] = useState("");
   const [quantity, setQuantity] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
   const [notes, setNotes] = useState("");
@@ -67,6 +79,9 @@ export default function OutboundStockPage() {
   const [processing, setProcessing] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState("");
+  const [modalError, setModalError] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
 
   const [successResult, setSuccessResult] =
     useState<OutboundResult | null>(null);
@@ -89,16 +104,29 @@ export default function OutboundStockPage() {
     value: number | string | null | undefined
   ) => Number(value ?? 0).toLocaleString("id-ID");
 
+  const transactionTypeLabels: Record<string, string> = {
+    sale: "Sale",
+    sample: "Sample",
+    giveaway: "Giveaway",
+    internal_use: "Internal Use",
+    other: "Other",
+  };
+
   function resetOutbound() {
     setSearchInput("");
     setSearchResults([]);
     setSelectedVariant(null);
     setSourceLocations([]);
     setSelectedSource(null);
+    setTransactionType("");
+    setSalesChannel("");
     setQuantity("");
     setReferenceNo("");
     setNotes("");
     setErrorMessage("");
+    setModalError("");
+    setConfirmOpen(false);
+    setSuccessOpen(false);
     setSuccessResult(null);
   }
 
@@ -206,13 +234,13 @@ export default function OutboundStockPage() {
     setLoadingVariant(false);
   }
 
-  async function handleOutbound(
+  function handleOutbound(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault();
 
     setErrorMessage("");
-    setSuccessResult(null);
+    setModalError("");
 
     if (!selectedVariant) {
       setErrorMessage("SKU wajib dipilih.");
@@ -221,6 +249,21 @@ export default function OutboundStockPage() {
 
     if (!selectedSource) {
       setErrorMessage("Source rack wajib dipilih.");
+      return;
+    }
+
+    if (!transactionType) {
+      setErrorMessage("Transaction Type wajib dipilih.");
+      return;
+    }
+
+    if (
+      transactionType === "sale" &&
+      !salesChannel.trim()
+    ) {
+      setErrorMessage(
+        "Sales Channel wajib dipilih untuk transaksi Sale."
+      );
       return;
     }
 
@@ -247,16 +290,38 @@ export default function OutboundStockPage() {
     }
 
     if (!referenceNo.trim()) {
-      setErrorMessage(
-        "Reference wajib diisi."
+      setErrorMessage("Reference wajib diisi.");
+      return;
+    }
+
+    // VALIDASI SELESAI.
+    // Jangan langsung submit.
+    // Tampilkan popup konfirmasi terlebih dahulu.
+    setConfirmOpen(true);
+  }
+
+  async function processOutbound() {
+    if (
+      !selectedVariant ||
+      !selectedSource ||
+      !transactionType
+    ) {
+      setConfirmOpen(false);
+      setModalError(
+        "Data outbound belum lengkap. Silakan periksa kembali form."
       );
       return;
     }
 
+    const outboundQty = Number(quantity);
+
+    setConfirmOpen(false);
     setProcessing(true);
+    setErrorMessage("");
+    setModalError("");
 
     const { data, error } = await supabase.rpc(
-      "outbound_stock",
+      "post_outbound_transaction",
       {
         p_variant_id:
           selectedVariant.variant_id,
@@ -265,12 +330,24 @@ export default function OutboundStockPage() {
         p_quantity: outboundQty,
         p_reference_no:
           referenceNo.trim(),
-        p_notes: notes.trim() || null,
+        p_transaction_type:
+          transactionType,
+        p_sales_channel:
+          transactionType === "sale"
+            ? salesChannel.trim()
+            : null,
+
+        // Retained only for RPC backward compatibility.
+        // Discount belongs to Sales/POS, not WMS Outbound.
+        p_discount_amount: 0,
+
+        p_notes:
+          notes.trim() || null,
       }
     );
 
     if (error) {
-      setErrorMessage(error.message);
+      setModalError(error.message);
       setProcessing(false);
       return;
     }
@@ -281,7 +358,7 @@ export default function OutboundStockPage() {
         | undefined) ?? null;
 
     if (!result) {
-      setErrorMessage(
+      setModalError(
         "Outbound berhasil diproses tetapi hasil transaksi tidak ditemukan."
       );
       setProcessing(false);
@@ -289,7 +366,12 @@ export default function OutboundStockPage() {
     }
 
     setSuccessResult(result);
+    setSuccessOpen(true);
     setProcessing(false);
+  }
+
+  function closeErrorModal() {
+    setModalError("");
   }
 
   return (
@@ -326,6 +408,7 @@ export default function OutboundStockPage() {
             </header>
 
             {successResult &&
+              !successOpen &&
               selectedVariant &&
               selectedSource && (
                 <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
@@ -338,7 +421,7 @@ export default function OutboundStockPage() {
                     diperbarui.
                   </p>
 
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <div className="rounded-xl bg-white p-4">
                       <div className="text-xs text-slate-500">
                         SKU
@@ -356,6 +439,26 @@ export default function OutboundStockPage() {
 
                       <div className="mt-1 font-semibold">
                         #{successResult.new_movement_no}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-4">
+                      <div className="text-xs text-slate-500">
+                        Transaction Type
+                      </div>
+
+                      <div className="mt-1 font-semibold">
+                        {transactionTypeLabels[successResult.transaction_type ?? transactionType] ?? (successResult.transaction_type ?? transactionType)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-white p-4">
+                      <div className="text-xs text-slate-500">
+                        Sales Channel
+                      </div>
+
+                      <div className="mt-1 font-semibold">
+                        {successResult.sales_channel ?? "-"}
                       </div>
                     </div>
 
@@ -715,6 +818,68 @@ export default function OutboundStockPage() {
                       >
                         <div>
                           <label className="mb-2 block text-sm font-medium">
+                            Transaction Type
+                            <span className="ml-1 text-red-500">
+                              *
+                            </span>
+                          </label>
+
+                          <select
+                            required
+                            value={transactionType}
+                            onChange={(event) => {
+                              const value = event.target.value as TransactionType | "";
+                              setTransactionType(value);
+                              if (value !== "sale") {
+                                setSalesChannel("");
+                              }
+                              setErrorMessage("");
+                            }}
+                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
+                          >
+                            <option value="">Pilih Transaction Type</option>
+                            <option value="sale">Sale</option>
+                            <option value="sample">Sample</option>
+                            <option value="giveaway">Giveaway</option>
+                            <option value="internal_use">Internal Use</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+
+                        {transactionType === "sale" && (
+                          <div>
+                            <label className="mb-2 block text-sm font-medium">
+                              Sales Channel
+                              <span className="ml-1 text-red-500">
+                                *
+                              </span>
+                            </label>
+
+                            <select
+                              required
+                              value={salesChannel}
+                              onChange={(event) =>
+                                setSalesChannel(event.target.value)
+                              }
+                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
+                            >
+                              <option value="">Pilih Sales Channel</option>
+                              <option value="TikTok Shop">TikTok Shop</option>
+                              <option value="Shopee">Shopee</option>
+                              <option value="Tokopedia">Tokopedia</option>
+                              <option value="Lazada">Lazada</option>
+                              <option value="Website">Website</option>
+                              <option value="WhatsApp">WhatsApp</option>
+                              <option value="Offline Store">Offline Store</option>
+                              <option value="Bazaar/Event">Bazaar/Event</option>
+                              <option value="Wholesale/Reseller">Wholesale/Reseller</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium">
                             Quantity
                           </label>
 
@@ -780,7 +945,7 @@ export default function OutboundStockPage() {
                                 event.target.value
                               )
                             }
-                            placeholder="Contoh: TikTok Shop / Shopee / Offline Store"
+                            placeholder="Catatan tambahan jika diperlukan"
                             className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500"
                           />
                         </div>
@@ -804,6 +969,352 @@ export default function OutboundStockPage() {
           </div>
         </main>
       </div>
+
+      {/* ======================================================
+          POPUP KONFIRMASI OUTBOUND
+          ====================================================== */}
+      {confirmOpen &&
+        selectedVariant &&
+        selectedSource && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="outbound-confirm-title"
+          >
+            <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+              <div className="border-b border-slate-200 px-6 py-5">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Konfirmasi Transaksi
+                </div>
+
+                <h2
+                  id="outbound-confirm-title"
+                  className="mt-1 text-xl font-bold"
+                >
+                  Yakin proses Outbound?
+                </h2>
+
+                <p className="mt-2 text-sm text-slate-500">
+                  Setelah dikonfirmasi, stok inventory akan
+                  berkurang dan movement akan tercatat.
+                </p>
+              </div>
+
+              <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+                <div className="space-y-3">
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      SKU
+                    </span>
+
+                    <span className="max-w-[65%] break-all text-right text-sm font-semibold">
+                      {selectedVariant.sku}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      Transaction Type
+                    </span>
+
+                    <span className="text-right text-sm font-semibold">
+                      {transactionTypeLabels[
+                        transactionType
+                      ] ?? transactionType}
+                    </span>
+                  </div>
+
+                  {transactionType === "sale" && (
+                    <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                      <span className="text-sm text-slate-500">
+                        Sales Channel
+                      </span>
+
+                      <span className="text-right text-sm font-semibold">
+                        {salesChannel}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      Quantity
+                    </span>
+
+                    <span className="text-right text-sm font-bold">
+                      {formatNumber(quantity)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      Source Rack
+                    </span>
+
+                    <span className="text-right text-sm font-semibold">
+                      {selectedSource.location_code}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      Available Stock
+                    </span>
+
+                    <span className="text-right text-sm font-semibold">
+                      {formatNumber(
+                        selectedSource.qty_on_hand
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+                    <span className="text-sm text-slate-500">
+                      Reference
+                    </span>
+
+                    <span className="max-w-[65%] break-words text-right text-sm font-semibold">
+                      {referenceNo.trim()}
+                    </span>
+                  </div>
+
+                  {notes.trim() && (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-slate-500">
+                        Notes
+                      </span>
+
+                      <span className="max-w-[65%] break-words text-right text-sm">
+                        {notes.trim()}
+                      </span>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmOpen(false)
+                  }
+                  disabled={processing}
+                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium disabled:opacity-50"
+                >
+                  Batal
+                </button>
+
+                <button
+                  type="button"
+                  onClick={processOutbound}
+                  disabled={processing}
+                  className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {processing
+                    ? "Processing..."
+                    : "Ya, Proses Outbound"}
+                </button>
+
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* ======================================================
+          POPUP ERROR
+          ====================================================== */}
+      {modalError && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="outbound-error-title"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+            <div className="px-6 py-6">
+
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-xl font-bold text-red-700">
+                !
+              </div>
+
+              <h2
+                id="outbound-error-title"
+                className="mt-4 text-xl font-bold"
+              >
+                Outbound gagal
+              </h2>
+
+              <p className="mt-2 break-words text-sm leading-6 text-slate-600">
+                {modalError}
+              </p>
+
+              <button
+                type="button"
+                onClick={closeErrorModal}
+                className="mt-6 w-full rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
+              >
+                Tutup
+              </button>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================
+          POPUP SUCCESS
+          ====================================================== */}
+      {successOpen &&
+        successResult &&
+        selectedVariant &&
+        selectedSource && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="outbound-success-title"
+          >
+            <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+              <div className="px-6 py-6">
+
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl font-bold text-emerald-700">
+                  ✓
+                </div>
+
+                <h2
+                  id="outbound-success-title"
+                  className="mt-4 text-2xl font-bold"
+                >
+                  Outbound berhasil
+                </h2>
+
+                <p className="mt-2 text-sm text-slate-500">
+                  Inventory dan movement history sudah
+                  diperbarui.
+                </p>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Movement No
+                    </div>
+
+                    <div className="mt-1 font-bold">
+                      #{successResult.new_movement_no}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      SKU
+                    </div>
+
+                    <div className="mt-1 break-all font-semibold">
+                      {selectedVariant.sku}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Transaction Type
+                    </div>
+
+                    <div className="mt-1 font-semibold">
+                      {transactionTypeLabels[
+                        successResult.transaction_type ??
+                          transactionType
+                      ] ??
+                        (successResult.transaction_type ??
+                          transactionType)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Sales Channel
+                    </div>
+
+                    <div className="mt-1 font-semibold">
+                      {successResult.sales_channel ?? "-"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Quantity
+                    </div>
+
+                    <div className="mt-1 font-bold">
+                      {formatNumber(quantity)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Source Rack
+                    </div>
+
+                    <div className="mt-1 font-semibold">
+                      {selectedSource.location_code}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Reference
+                    </div>
+
+                    <div className="mt-1 break-words font-semibold">
+                      {referenceNo}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <div className="text-xs text-slate-500">
+                      Stock After
+                    </div>
+
+                    <div className="mt-1 font-bold">
+                      {formatNumber(
+                        successResult.source_qty_after
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+
+                  <button
+                    type="button"
+                    onClick={resetOutbound}
+                    className="flex-1 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
+                  >
+                    Outbound Lagi
+                  </button>
+
+                  <Link
+                    href="/stock-movement"
+                    className="flex-1 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-semibold"
+                  >
+                    Lihat Movement
+                  </Link>
+
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
+
     </div>
   );
 }

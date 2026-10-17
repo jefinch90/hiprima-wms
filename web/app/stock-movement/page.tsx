@@ -67,6 +67,7 @@ type MovementRow = {
   reason: string | null;
 
   reference_no: string | null;
+  sales_channel: string | null;
 
   notes: string | null;
 
@@ -108,7 +109,7 @@ export default function StockMovementPage() {
 
 
 
-  const pageSize = 50;
+  const [pageSize, setPageSize] = useState(10);
 
 
 
@@ -282,6 +283,7 @@ export default function StockMovementPage() {
 
     currentPage,
 
+    pageSize,
     router,
 
     search,
@@ -749,25 +751,16 @@ export default function StockMovementPage() {
                     <table className="w-full table-fixed text-left text-sm [&_th:nth-child(4)]:whitespace-nowrap [&_td:nth-child(4)]:whitespace-nowrap">
 
                       <colgroup>
-
-                        <col className="w-[6%]" />
-
-                        <col className="w-[12%]" />
-
-                        <col className="w-[9%]" />
-
-                        <col className="w-[12%]" />
-
-                        <col className="w-[18%]" />
-
-                        <col className="w-[6%]" />
-
+                        <col className="w-[5%]" />
                         <col className="w-[11%]" />
-
-                        <col className="w-[13%]" />
-
-                        <col className="w-[13%]" />
-
+                        <col className="w-[8%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[16%]" />
+                        <col className="w-[6%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[9%]" />
+                        <col className="w-[14%]" />
                       </colgroup>
 
 
@@ -823,6 +816,9 @@ export default function StockMovementPage() {
                             Reference
 
                           </th>
+                          <th className="px-3 py-4">
+                            Sales Channel
+                          </th>
 
                           <th className="px-3 py-4">
 
@@ -854,7 +850,7 @@ export default function StockMovementPage() {
 
                             >
 
-                              <td className="break-words px-3 py-5 font-semibold">
+                              <td className="whitespace-nowrap px-2 py-5 font-semibold text-xs">
 
                                 #
 
@@ -991,6 +987,9 @@ export default function StockMovementPage() {
                                 )}
 
                               </td>
+                            <td className="break-words px-3 py-5">
+                              {movement.sales_channel ?? "-"}
+                            </td>
 
 
 
@@ -1016,7 +1015,7 @@ export default function StockMovementPage() {
 
                             <td
 
-                              colSpan={9}
+                              colSpan={10}
 
                               className="px-5 py-12 text-center text-slate-500"
 
@@ -1223,6 +1222,15 @@ export default function StockMovementPage() {
                                   "-"}
 
                               </div>
+                          <div>
+                            <div className="text-xs text-slate-400">
+                              Sales Channel
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {movement.sales_channel ?? "-"}
+                            </div>
+                          </div>
+
 
 
 
@@ -1296,12 +1304,22 @@ export default function StockMovementPage() {
 
               <div className="flex flex-col gap-4 border-t border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
 
-                <div className="text-sm text-slate-500">
-
-                  Maksimal {pageSize} movement per
-
-                  halaman
-
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <span>Tampilkan</span>
+                  <select
+                    aria-label="Jumlah movement per halaman"
+                    value={pageSize}
+                    onChange={(event) => {
+                      setPageSize(Number(event.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                  </select>
+                  <span>transaksi per halaman</span>
                 </div>
 
 
