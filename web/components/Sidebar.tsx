@@ -126,6 +126,13 @@ export default function Sidebar() {
       visible: true,
     },
     {
+      label: "Sales Analytics",
+      href: "/sales-analytics",
+      visible:
+        role === "owner" ||
+        role === "admin",
+    },
+    {
       label: "Locations",
       href: "/locations",
       visible: true,
