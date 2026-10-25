@@ -133,6 +133,14 @@ export default function Sidebar() {
         role === "admin",
     },
     {
+      label: "Production Planning",
+      href: "/production-planning",
+      visible:
+        role === "owner" ||
+        role === "admin" ||
+        role === "warehouse_manager",
+    },
+    {
       label: "Locations",
       href: "/locations",
       visible: true,
