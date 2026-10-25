@@ -391,68 +391,6 @@ export default function ProductionPlanningPage() {
               </div>
             </div>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5">
-              <h2 className="font-semibold">
-                Parameter Simulasi
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Ubah parameter, lalu jalankan simulasi.
-                Tidak ada PO atau stok yang diubah.
-              </p>
-
-              <div className="mt-4 flex flex-wrap items-end gap-3">
-                <label className="min-w-[145px] flex-1 space-y-1">
-                  <span className="text-xs font-medium text-slate-600">
-                    Lead Time (hari)
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={180}
-                    value={leadDraft}
-                    onChange={e =>
-                      setLeadDraft(Number(e.target.value))
-                    }
-                    className={field}
-                  />
-                </label>
-
-                <label className="min-w-[145px] flex-1 space-y-1">
-                  <span className="text-xs font-medium text-slate-600">
-                    Review Cycle (hari)
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={reviewDraft}
-                    onChange={e =>
-                      setReviewDraft(Number(e.target.value))
-                    }
-                    className={field}
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={applySimulation}
-                  disabled={loading}
-                  className="shrink-0 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-                >
-                  Jalankan Simulasi
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => void exportExcel()}
-                  disabled={loading || exporting || !report || filtered.length === 0}
-                  className="shrink-0 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
-                >
-                  {exporting ? "Menyiapkan Excel..." : "Export Excel"}
-                </button>
-              </div>
-            </section>
-
             {errorMessage && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 {errorMessage}
@@ -552,6 +490,68 @@ export default function ProductionPlanningPage() {
                     </p>
                   </div>
                 </div>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <h2 className="font-semibold">
+                    Parameter Simulasi
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Ubah parameter, lalu jalankan simulasi.
+                    Tidak ada PO atau stok yang diubah.
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap items-end gap-3">
+                    <label className="min-w-[145px] flex-1 space-y-1">
+                      <span className="text-xs font-medium text-slate-600">
+                        Lead Time (hari)
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={180}
+                        value={leadDraft}
+                        onChange={e =>
+                          setLeadDraft(Number(e.target.value))
+                        }
+                        className={field}
+                      />
+                    </label>
+
+                    <label className="min-w-[145px] flex-1 space-y-1">
+                      <span className="text-xs font-medium text-slate-600">
+                        Review Cycle (hari)
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={reviewDraft}
+                        onChange={e =>
+                          setReviewDraft(Number(e.target.value))
+                        }
+                        className={field}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={applySimulation}
+                      disabled={loading}
+                      className="shrink-0 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Jalankan Simulasi
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void exportExcel()}
+                      disabled={loading || exporting || !report || filtered.length === 0}
+                      className="shrink-0 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+                    >
+                      {exporting ? "Menyiapkan Excel..." : "Export Excel"}
+                    </button>
+                  </div>
+                </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white">
                   <div className="space-y-4 border-b border-slate-200 p-5">
