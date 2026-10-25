@@ -84,6 +84,7 @@ export default function ProductionPlanningPage() {
   const [items, setItems] = useState<PlanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const [search, setSearch] = useState("");
   const [abcFilter, setAbcFilter] = useState("ALL");
@@ -323,52 +324,38 @@ export default function ProductionPlanningPage() {
     });
   }
 
-  function exportCsv() {
-    const headers = [
-      "SKU", "Produk", "Warna", "Size",
-      "ABC", "Trend", "Quality",
-      "Sold7", "Sold30", "Sold90",
-      "Velocity7", "Velocity30", "Velocity90",
-      "ForecastDaily", "SafetyDays",
-      "ReorderPoint", "TargetStockPosition",
-      "Status"
-    ];
+  async function exportExcel() {
+    if (!report || loading || exporting || filtered.length === 0) {
+      return;
+    }
 
-    const escapeCell = (value: unknown) => {
-      let text = String(value ?? "");
-      if (/^[=+@\t\r]/.test(text)) text = "'" + text;
-      return '"' + text.replace(/"/g, '""') + '"';
-    };
+    setExporting(true);
+    setErrorMessage("");
 
-    const csvRows = filtered.map(x => [
-      x.sku_master, x.product_name, x.color, x.size,
-      x.abc_class, x.sales_trend, x.forecast_quality,
-      x.sold_7, x.sold_30, x.sold_90,
-      x.velocity_7, x.velocity_30, x.velocity_90,
-      x.forecast_daily, x.safety_days,
-      x.reorder_point_units,
-      x.target_stock_position_units,
-      x.planning_status
-    ]);
+    try {
+      const { exportProductionExcel } =
+        await import("./exportExcel");
 
-    const csv = [
-      headers.map(escapeCell).join(","),
-      ...csvRows.map(r => r.map(escapeCell).join(","))
-    ].join("\r\n");
-
-    const blob = new Blob(
-      ["\ufeff", csv],
-      { type: "text/csv;charset=utf-8" }
-    );
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download =
-      "HiPRIMA_Production_Simulation_" +
-      (report?.as_of_date ?? "draft") + ".csv";
-    a.click();
-    URL.revokeObjectURL(url);
+      await exportProductionExcel({
+        rows: filtered,
+        asOfDate: report.as_of_date,
+        leadDays: parameters.lead,
+        reviewDays: parameters.review,
+        mappingPercent: number(
+          report.summary.mapped_coverage_percent
+        ),
+        unmappedUnits: number(
+          report.summary.unmapped_units_90
+        )
+      });
+    } catch (error) {
+      setErrorMessage(
+        "Export Excel gagal: " +
+        (error instanceof Error ? error.message : String(error))
+      );
+    } finally {
+      setExporting(false);
+    }
   }
 
   const field =
@@ -457,11 +444,11 @@ export default function ProductionPlanningPage() {
 
                 <button
                   type="button"
-                  onClick={exportCsv}
-                  disabled={loading || !report}
+                  onClick={() => void exportExcel()}
+                  disabled={loading || exporting || !report || filtered.length === 0}
                   className="shrink-0 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium disabled:opacity-50"
                 >
-                  Export CSV
+                  {exporting ? "Menyiapkan Excel..." : "Export Excel"}
                 </button>
               </div>
             </section>
