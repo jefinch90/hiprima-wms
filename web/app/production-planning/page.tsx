@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
@@ -399,13 +398,6 @@ export default function ProductionPlanningPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Link
-                  href="/sales-analytics/dashboard"
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-slate-100"
-                >
-                  Sales Analytics
-                </Link>
-
                 <span className="rounded-xl bg-amber-100 px-4 py-2.5 text-sm font-semibold text-amber-900">
                   Simulation / Draft
                 </span>
