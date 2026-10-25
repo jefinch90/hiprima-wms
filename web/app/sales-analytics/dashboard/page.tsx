@@ -306,7 +306,7 @@ export default function SalesDashboardPage() {
             </button>
           </div>
 
-          {segment === "fashion" && (
+          {(Number(classification?.unknown_units ?? 0) > 0 && (segment === "fashion" && (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <span className="font-semibold">
                 Analisis Fashion sementara.
@@ -327,7 +327,7 @@ export default function SalesDashboardPage() {
                 </p>
               )}
             </div>
-          )}
+          )))}
 
 
                   <p className="mt-2 text-sm text-slate-500">
