@@ -141,6 +141,14 @@ export default function Sidebar() {
         role === "warehouse_manager",
     },
     {
+      label: "Vendor Management",
+      href: "/production-planning/vendors",
+      visible:
+        role === "owner" ||
+        role === "admin" ||
+        role === "warehouse_manager",
+    },
+    {
       label: "Locations",
       href: "/locations",
       visible: true,
