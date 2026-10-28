@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
+import { wmsToast } from "@/utils/wmsNotifications";
 
 type Num = number | string | null;
 
@@ -28,9 +29,20 @@ type PlanItem = {
   reorder_point_units: Num;
   target_stock_position_units: Num;
   planning_status: string;
+  vendor_name?: string | null;
+  vendor_review_status?: string | null;
+  vendor_lead_time_days?: Num;
+  effective_lead_time_days?: Num;
+  lead_time_source?: string | null;
+  vendor_lifecycle_status?: string | null;
+  vendor_moq_type?: string | null;
+  vendor_moq_quantity?: Num;
+  moq_note?: string | null;
+  production_policy?: string | null;
 };
 
 type Preview = {
+  engine?: string;
   as_of_date: string;
   data_age_days: number;
   data_fresh: boolean;
@@ -69,6 +81,22 @@ const trendColor: Record<string, string> = {
   NO_RECENT_SALES: "bg-slate-100 text-slate-600"
 };
 
+function formatVendorMoq(item: PlanItem): string {
+  if (item.lead_time_source !== "VERIFIED_VENDOR") {
+    return "Belum Verified";
+  }
+
+  if (item.vendor_moq_type === "PER_PRODUCT") {
+    return String(number(item.vendor_moq_quantity)) + " pcs / model";
+  }
+  if (item.vendor_moq_type === "PER_COLOR") {
+    return String(number(item.vendor_moq_quantity)) + " pcs / warna";
+  }
+  if (item.vendor_moq_type === "BY_REQUEST") {
+    return "By Request";
+  }
+  return "Belum ditentukan";
+}
 export default function ProductionPlanningPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -80,6 +108,7 @@ export default function ProductionPlanningPage() {
     review: 7
   });
 
+  const [simulationRunId, setSimulationRunId] = useState(0);
   const [report, setReport] = useState<Preview | null>(null);
   const [items, setItems] = useState<PlanItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,6 +119,7 @@ export default function ProductionPlanningPage() {
   const [abcFilter, setAbcFilter] = useState("ALL");
   const [trendFilter, setTrendFilter] = useState("ALL");
   const [qualityFilter, setQualityFilter] = useState("ALL");
+  const [vendorFilter, setVendorFilter] = useState("ALL");
   const [sortBy, setSortBy] = useState("priority");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -139,7 +169,7 @@ export default function ProductionPlanningPage() {
         // supaya filter dan sorting mencakup semua SKU.
         for (let offset = 0; offset < 10000; offset += 200) {
           const { data, error } = await supabase.rpc(
-            "get_fashion_production_preview",
+            "get_fashion_production_preview_v2",
             {
               p_lead_time_days: parameters.lead,
               p_review_days: parameters.review,
@@ -156,6 +186,13 @@ export default function ProductionPlanningPage() {
             throw new Error("Format RPC Planning tidak valid.");
           }
 
+          if (
+            result.engine !== "weekly_smart_replenishment_v2" ||
+            result.planning_mode !== "DRAFT_ONLY" ||
+            result.production_release_allowed !== false
+          ) {
+            throw new Error("Simulation Engine V2 belum valid atau belum aman.");
+          }
           if (!initialReport) {
             initialReport = result;
             expected = number(
@@ -198,9 +235,24 @@ export default function ProductionPlanningPage() {
           setReport(initialReport);
           setItems(fetched);
           setCurrentPage(1);
+          if (simulationRunId > 0) {
+            wmsToast.success(
+              "Simulasi berhasil",
+              fetched.length.toLocaleString("id-ID") +
+                " SKU selesai dihitung. Hasil masih Draft; stok dan PO tidak berubah."
+            );
+          }
         }
       } catch (error) {
         if (!cancelled) {
+          if (simulationRunId > 0) {
+            wmsToast.error(
+              "Simulasi gagal",
+              error instanceof Error
+                ? error.message
+                : "Data simulasi gagal dimuat."
+            );
+          }
           setErrorMessage(
             error instanceof Error
               ? error.message
@@ -217,7 +269,7 @@ export default function ProductionPlanningPage() {
     return () => {
       cancelled = true;
     };
-  }, [supabase, router, parameters]);
+  }, [supabase, router, parameters, simulationRunId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -238,7 +290,13 @@ export default function ProductionPlanningPage() {
         (trendFilter === "ALL" ||
           item.sales_trend === trendFilter) &&
         (qualityFilter === "ALL" ||
-          item.forecast_quality === qualityFilter)
+          item.forecast_quality === qualityFilter) &&
+        (vendorFilter === "ALL" ||
+          (vendorFilter === "VERIFIED_VENDOR" &&
+            item.lead_time_source === "VERIFIED_VENDOR") ||
+          (vendorFilter === "DEFAULT_ASSUMPTION" &&
+            item.lead_time_source !== "VERIFIED_VENDOR") ||
+          item.production_policy === vendorFilter)
       );
     });
 
@@ -279,7 +337,7 @@ export default function ProductionPlanningPage() {
     });
   }, [
     items, search, abcFilter,
-    trendFilter, qualityFilter, sortBy
+    trendFilter, qualityFilter, vendorFilter, sortBy
   ]);
 
   const pageSize = 25;
@@ -322,6 +380,7 @@ export default function ProductionPlanningPage() {
       lead: leadDraft,
       review: reviewDraft
     });
+    setSimulationRunId((id) => id + 1);
   }
 
   async function exportExcel() {
@@ -433,6 +492,25 @@ export default function ProductionPlanningPage() {
                     [
                       "Forecast Perlu Review",
                       fmt(limited)
+                    ],
+                    [
+                      "SKU Vendor Verified",
+                      fmt(items.filter(x =>
+                        x.lead_time_source === "VERIFIED_VENDOR"
+                      ).length)
+                    ],
+                    [
+                      "SKU Lead Time Asumsi",
+                      fmt(items.filter(x =>
+                        x.lead_time_source !== "VERIFIED_VENDOR"
+                      ).length)
+                    ],
+                    [
+                      "SKU Produksi Diblokir",
+                      fmt(items.filter(x =>
+                        ["BLOCKED_HOLD", "BLOCKED_DISCONTINUE"]
+                          .includes(x.production_policy ?? "")
+                      ).length)
                     ]
                   ].map(([label, value]) => (
                     <div
@@ -503,7 +581,10 @@ export default function ProductionPlanningPage() {
                   <div className="mt-4 flex flex-wrap items-end gap-3">
                     <label className="min-w-[145px] flex-1 space-y-1">
                       <span className="text-xs font-medium text-slate-600">
-                        Lead Time (hari)
+                        Lead Time Cadangan (hari)
+                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                      Hanya untuk SKU tanpa vendor Verified
+                    </span>
                       </span>
                       <input
                         type="number"
@@ -519,7 +600,10 @@ export default function ProductionPlanningPage() {
 
                     <label className="min-w-[145px] flex-1 space-y-1">
                       <span className="text-xs font-medium text-slate-600">
-                        Review Cycle (hari)
+                        Siklus Review Produksi (hari)
+                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                      Interval evaluasi kebutuhan produksi ulang
+                    </span>
                       </span>
                       <input
                         type="number"
@@ -566,7 +650,7 @@ export default function ProductionPlanningPage() {
                       </p>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                       <input
                         type="search"
                         value={search}
@@ -628,6 +712,22 @@ export default function ProductionPlanningPage() {
                       </select>
 
                       <select
+                        value={vendorFilter}
+                        className={field}
+                        onChange={e => {
+                          setVendorFilter(e.target.value);
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <option value="ALL">Semua Status Vendor</option>
+                        <option value="VERIFIED_VENDOR">Vendor Verified</option>
+                        <option value="DEFAULT_ASSUMPTION">Lead Time Asumsi</option>
+                        <option value="BLOCKED_HOLD">Hold - Blocked</option>
+                        <option value="BLOCKED_DISCONTINUE">Discontinue - Blocked</option>
+                        <option value="SEASONAL_APPROVAL_REQUIRED">Seasonal - Approval</option>
+                        <option value="ACTIVE_SIMULATION_ONLY">On Produksi</option>
+                      </select>
+                      <select
                         value={sortBy}
                         className={field}
                         onChange={e => setSortBy(e.target.value)}
@@ -642,11 +742,15 @@ export default function ProductionPlanningPage() {
                   </div>
 
                   <div className="w-full max-w-full overflow-x-auto">
-                    <table className="min-w-[1150px] w-full text-left text-xs">
+                    <table className="min-w-[1680px] w-full text-left text-xs">
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
                           {[
                             "SKU Master",
+                            "Vendor",
+                            "Lead Time",
+                            "Lifecycle / Kebijakan",
+                            "MOQ",
                             "ABC",
                             "Tren",
                             "7 Hari",
@@ -684,6 +788,49 @@ export default function ProductionPlanningPage() {
                               </div>
                             </td>
 
+                            <td className="px-4 py-3">
+                              <div className="font-semibold">
+                                {item.vendor_name ?? "Belum Verified"}
+                              </div>
+                              <div className="mt-1 text-slate-500">
+                                {item.vendor_review_status ?? "Perlu review"}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3 tabular-nums">
+                              <div className="font-semibold">
+                                {fmt(item.effective_lead_time_days)} hari
+                              </div>
+                              <div className={
+                                "mt-1 text-[11px] " +
+                                (item.lead_time_source === "VERIFIED_VENDOR"
+                                  ? "text-emerald-700"
+                                  : "text-amber-700")
+                              }>
+                                {item.lead_time_source === "VERIFIED_VENDOR"
+                                  ? "Vendor Verified"
+                                  : "Asumsi"}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <div className="font-semibold">
+                                {item.vendor_lifecycle_status ?? "Perlu review"}
+                              </div>
+                              <div className={
+                                "mt-1 text-[11px] " +
+                                (["BLOCKED_HOLD", "BLOCKED_DISCONTINUE"]
+                                  .includes(item.production_policy ?? "")
+                                  ? "text-red-700"
+                                  : "text-slate-500")
+                              }>
+                                {item.production_policy ?? "Perlu review"}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              {formatVendorMoq(item)}
+                            </td>
                             <td className="px-4 py-3">
                               <span className={
                                 "rounded-lg px-2 py-1 font-bold " +

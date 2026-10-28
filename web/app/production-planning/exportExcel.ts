@@ -25,6 +25,16 @@ export type ProductionExportRow = {
   reorder_point_units: Num;
   target_stock_position_units: Num;
   planning_status: string;
+  vendor_name?: string | null;
+  vendor_review_status?: string | null;
+  vendor_lead_time_days?: Num;
+  effective_lead_time_days?: Num;
+  lead_time_source?: string | null;
+  vendor_lifecycle_status?: string | null;
+  vendor_moq_type?: string | null;
+  vendor_moq_quantity?: Num;
+  moq_note?: string | null;
+  production_policy?: string | null;
 };
 
 type ExportOptions = {
@@ -39,6 +49,12 @@ type ExportOptions = {
 const headers = [
   "SKU Master",
   "Nama Produk",
+  "Nama Vendor",
+  "Lead Time Digunakan (Hari)",
+  "Sumber Lead Time",
+  "Lifecycle",
+  "MOQ",
+  "Kebijakan Produksi",
   "Warna",
   "Size",
   "ABC",
@@ -58,7 +74,7 @@ const headers = [
 ];
 
 const widths = [
-  23, 43, 19, 14, 9, 22,
+  23, 43, 19, 16, 22, 18, 25, 29, 19, 14, 9, 22,
   22, 16, 16, 16, 19, 19,
   19, 19, 21, 24, 28, 34
 ];
@@ -173,6 +189,18 @@ export async function exportProductionExcel(
     const values: (string | number)[] = [
       item.sku_master,
       item.product_name,
+      item.vendor_name ?? "Belum Verified",
+      number(item.effective_lead_time_days),
+      item.lead_time_source === "VERIFIED_VENDOR"
+        ? "Vendor Verified" : "Asumsi / Cadangan",
+      item.vendor_lifecycle_status ?? "Perlu Review",
+      item.vendor_moq_type === "PER_PRODUCT"
+        ? String(number(item.vendor_moq_quantity)) + " pcs/model"
+        : item.vendor_moq_type === "PER_COLOR"
+          ? String(number(item.vendor_moq_quantity)) + " pcs/warna"
+          : item.vendor_moq_type === "BY_REQUEST"
+            ? "By Request" : "Belum Ditentukan",
+      item.production_policy ?? "Perlu Review",
       item.color ?? "",
       item.size ?? "",
       item.abc_class,
@@ -200,7 +228,7 @@ export async function exportProductionExcel(
           value,
           type: Number,
           format:
-            col >= 10 && col <= 13
+            col >= 16 && col <= 19
               ? "#,##0.00"
               : "#,##0",
           backgroundColor,
