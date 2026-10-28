@@ -1,3 +1,4 @@
+import { exportSafeTarget, productionPolicyLabel } from "./productionSafety";
 import type {
   SheetData,
   Row,
@@ -200,7 +201,7 @@ export async function exportProductionExcel(
           ? String(number(item.vendor_moq_quantity)) + " pcs/warna"
           : item.vendor_moq_type === "BY_REQUEST"
             ? "By Request" : "Belum Ditentukan",
-      item.production_policy ?? "Perlu Review",
+      productionPolicyLabel(item),
       item.color ?? "",
       item.size ?? "",
       item.abc_class,
@@ -214,8 +215,8 @@ export async function exportProductionExcel(
       number(item.velocity_90),
       number(item.forecast_daily),
       number(item.safety_days),
-      number(item.reorder_point_units),
-      number(item.target_stock_position_units),
+      exportSafeTarget(item, item.reorder_point_units),
+      exportSafeTarget(item, item.target_stock_position_units),
       item.planning_status
     ];
 

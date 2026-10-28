@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
 import { wmsToast } from "@/utils/wmsNotifications";
+import { productionIsRestricted, productionPolicyLabel } from "./productionSafety";
 
 type Num = number | string | null;
 
@@ -824,7 +825,7 @@ export default function ProductionPlanningPage() {
                                   ? "text-red-700"
                                   : "text-slate-500")
                               }>
-                                {item.production_policy ?? "Perlu review"}
+                                {productionPolicyLabel(item)}
                               </div>
                             </td>
 
@@ -871,10 +872,10 @@ export default function ProductionPlanningPage() {
                               {item.safety_days} hari
                             </td>
                             <td className="px-4 py-3 font-medium tabular-nums">
-                              {fmt(item.reorder_point_units)}
+                              {productionIsRestricted(item) ? "—" : fmt(item.reorder_point_units)}
                             </td>
                             <td className="px-4 py-3 font-semibold tabular-nums">
-                              {fmt(item.target_stock_position_units)}
+                              {productionIsRestricted(item) ? "—" : fmt(item.target_stock_position_units)}
                             </td>
                             <td className="px-4 py-3 text-slate-500">
                               {item.forecast_quality === "NORMAL"
