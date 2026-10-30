@@ -19,6 +19,7 @@ type SaleRow = {
   variant_name: string;
   source_channel: string;
   source_account: string;
+  source_user: string;
   sale_hour: string;
   unit_price: number;
   orders_count: number;
@@ -166,7 +167,7 @@ function parseIseller(rows: unknown[][]): SaleRow[] {
 
   if (headerIndex < 0) {
     throw new Error(
-      "Gunakan Excel iSeller terbaru dengan 17 kolom."
+      "Gunakan Excel iSeller dengan header laporan penjualan yang benar."
     );
   }
 
@@ -263,6 +264,10 @@ function parseIseller(rows: unknown[][]): SaleRow[] {
       get(row, "akun") ?? ""
     ).trim();
 
+    const sourceUser = column("pengguna") >= 0
+      ? String(get(row, "pengguna") ?? "").trim()
+      : "";
+
     const hour = String(
       get(row, "jam") ?? ""
     ).trim();
@@ -339,6 +344,7 @@ function parseIseller(rows: unknown[][]): SaleRow[] {
       variant.toLowerCase(),
       channel.toLowerCase(),
       account.toLowerCase(),
+      sourceUser.toLowerCase(),
       hour.toLowerCase(),
       price
     ]);
@@ -359,6 +365,7 @@ function parseIseller(rows: unknown[][]): SaleRow[] {
       variant_name: variant,
       source_channel: channel,
       source_account: account,
+      source_user: sourceUser,
       sale_hour: hour,
       unit_price: price,
       orders_count: orders,
@@ -409,6 +416,9 @@ export default function SalesAnalyticsPage() {
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SaleRow[]>([]);
+  const [skippedExisting, setSkippedExisting] = useState(0);
+  const [skippedToday, setSkippedToday] = useState(0);
+  const [newestImportedDate, setNewestImportedDate] = useState<string | null>(null);
 
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -457,6 +467,9 @@ export default function SalesAnalyticsPage() {
     setErrorMessage("");
     setSuccessMessage("");
     setPreview([]);
+    setSkippedExisting(0);
+    setSkippedToday(0);
+    setNewestImportedDate(null);
     setFile(null);
     setProgress(0);
     setParsing(true);
@@ -473,9 +486,64 @@ export default function SalesAnalyticsPage() {
       )) as unknown as unknown[][];
 
       const parsed = parseIseller(rows);
+      const hasUserColumn = rows.some((row) =>
+        row.map(normalize).includes("pengguna") &&
+        row.map(normalize).includes("nomor sku")
+      );
+
+      const { data: latestBatch, error: latestError } = await supabase
+        .from("iseller_import_batches")
+        .select("period_end")
+        .eq("status", "completed")
+        .not("period_end", "is", null)
+        .order("period_end", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestError) throw new Error(latestError.message);
+
+      const latestDate = latestBatch?.period_end ?? null;
+      const jakartaParts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Jakarta",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const datePart = (type: string) =>
+        jakartaParts.find((part) => part.type === type)?.value ?? "";
+      const todayJakarta = `${datePart("year")}-${datePart("month")}-${datePart("day")}`;
+
+      const newRows = parsed.filter(
+        (row) => (!latestDate || row.sale_date > latestDate) &&
+          row.sale_date < todayJakarta
+      );
+
+      const oldRows = parsed.filter(
+        (row) => latestDate !== null && row.sale_date <= latestDate
+      ).length;
+      const todayRows = parsed.filter(
+        (row) => row.sale_date >= todayJakarta
+      ).length;
+
+      if (!hasUserColumn) {
+        throw new Error(
+          "Kolom Pengguna belum ditemukan. Export ulang 18 kolom dari iSeller agar WhatsApp tidak hilang."
+        );
+      }
+
+      if (newRows.length === 0) {
+        throw new Error(
+          `Tidak ada tanggal penjualan baru yang lengkap untuk diimport. ` +
+          `Terakhir diimport: ${latestDate ?? "belum ada"}. ` +
+          `${oldRows} baris lama dan ${todayRows} baris hari ini dilewati.`
+        );
+      }
 
       setFile(selected);
-      setPreview(parsed);
+      setPreview(newRows);
+      setSkippedExisting(oldRows);
+      setSkippedToday(todayRows);
+      setNewestImportedDate(latestDate);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -556,6 +624,26 @@ export default function SalesAnalyticsPage() {
       end: dates.reduce(
         (a, b) => a > b ? a : b
       ),
+
+      users: new Set(preview.map((row) => normalize(row.source_user)).filter(Boolean)).size,
+
+      whatsapp: preview.filter((row) =>
+        normalize(row.source_channel) === "pos" &&
+        !/^BAZAR(?:\s|$)/i.test(row.product_title.trim()) &&
+        normalize(row.source_user) === "admin online"
+      ).length,
+
+      offline: preview.filter((row) =>
+        normalize(row.source_channel) === "pos" &&
+        !/^BAZAR(?:\s|$)/i.test(row.product_title.trim()) &&
+        normalize(row.source_user) === "kasir 1 store"
+      ).length,
+
+      unknownPos: preview.filter((row) =>
+        normalize(row.source_channel) === "pos" &&
+        !/^BAZAR(?:\s|$)/i.test(row.product_title.trim()) &&
+        !["admin online", "kasir 1 store"].includes(normalize(row.source_user))
+      ).length,
 
       bazar: preview.filter(
         (row) =>
@@ -714,6 +802,8 @@ export default function SalesAnalyticsPage() {
 
       setPreview([]);
       setFile(null);
+      setSkippedExisting(0);
+      setSkippedToday(0);
       setProgress(100);
 
       await loadBatches();
@@ -795,7 +885,7 @@ export default function SalesAnalyticsPage() {
 
               <p className="mt-2 text-sm text-slate-500">
                 Gunakan Export Root Table,
-                format Excel 17 kolom dan Semua Channel.
+                format Excel 18 kolom (termasuk Pengguna) dan Semua Channel.
               </p>
 
               <div className="mt-5">
@@ -829,6 +919,11 @@ export default function SalesAnalyticsPage() {
                     {[
                       ["Baris Data", integer(summary.rows)],
                       ["SKU Unik", integer(summary.sku)],
+                      ["Pengguna Unik", integer(summary.users)],
+                      ["Baris WhatsApp", integer(summary.whatsapp)],
+                      ["Baris Offline Store", integer(summary.offline)],
+                      ["POS Perlu Review", integer(summary.unknownPos)],
+                      ["Baris Lama Dilewati", integer(skippedExisting)],
                       ["Unit Terjual", integer(summary.units)],
                       [
                         "Penjualan Kotor",
@@ -887,8 +982,20 @@ export default function SalesAnalyticsPage() {
                   <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                     Data ini hanya untuk analitik.
                     Import tidak akan mengurangi stok.
-                    POS selain Bazar masih belum
-                    diklasifikasikan.
+                    BAZAR diprioritaskan, Admin Online = WhatsApp,
+                    Kasir 1 Store = Offline Store.
+                    POS dengan pengguna lain masih perlu review.
+                    {newestImportedDate && (
+                      <span className="mt-2 block">
+                        Impor terakhir sampai {newestImportedDate}. Data tanggal sebelumnya
+                        ({integer(skippedExisting)} baris) dilewati otomatis.
+                      </span>
+                    )}
+                    {skippedToday > 0 && (
+                      <span className="mt-2 block">
+                        {integer(skippedToday)} baris hari ini dilewati karena belum sehari penuh.
+                      </span>
+                    )}
                   </div>
 
                   <button

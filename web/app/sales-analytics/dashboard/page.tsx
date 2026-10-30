@@ -37,6 +37,13 @@ type ChannelRow = {
   net_sales: Numeric;
 };
 
+type UserRow = {
+  source_user: string;
+  sales_channel: string;
+  units_sold: Numeric;
+  net_sales: Numeric;
+};
+
 type SkuRow = {
   sku: string;
   product_name: string | null;
@@ -53,6 +60,7 @@ type DashboardResult = {
   summary: SalesSummary;
   daily: DailyRow[];
   channels: ChannelRow[];
+  users: UserRow[];
   top_skus: SkuRow[];
 };
 
@@ -155,7 +163,7 @@ export default function SalesDashboardPage() {
       setReport(null);
 
       const { data, error } = await supabase.rpc(
-        "get_iseller_sales_dashboard_v6",
+        "get_iseller_sales_dashboard_v7",
         {
           p_days: period,
           p_top_limit: 20,
@@ -175,6 +183,7 @@ export default function SalesDashboardPage() {
           !result.summary ||
           !Array.isArray(result.daily) ||
           !Array.isArray(result.channels) ||
+          !Array.isArray(result.users) ||
           !Array.isArray(result.top_skus)
         ) {
           setErrorMessage(
@@ -210,6 +219,7 @@ export default function SalesDashboardPage() {
 
   const daily = report?.daily ?? [];
   const channels = report?.channels ?? [];
+  const users = report?.users ?? [];
   const topSkus = report?.top_skus ?? [];
 
   const totalUnits = num(summary?.units_sold);
@@ -601,6 +611,41 @@ export default function SalesDashboardPage() {
                   </div>
                 </section>
 
+                <section className="mt-6 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 p-6">
+                    <h2 className="text-lg font-bold">Penjualan per Pengguna iSeller</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Berdasarkan segmen dan periode analisis yang dipilih.
+                      Pengguna dari import lama tanpa kolom Pengguna ditampilkan sebagai Tidak diketahui.
+                    </p>
+                  </div>
+                  <div className="w-full overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="p-4">Pengguna</th>
+                          <th className="p-4">Sales Channel</th>
+                          <th className="p-4 text-right">Unit Terjual</th>
+                          <th className="p-4 text-right">Penjualan Bersih</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {users.map((row, index) => (
+                          <tr key={`${row.source_user}-${row.sales_channel}-${index}`}>
+                            <td className="p-4 font-medium">{row.source_user}</td>
+                            <td className="p-4">{row.sales_channel || "Belum Terklasifikasi"}</td>
+                            <td className="p-4 text-right">{integer(row.units_sold)}</td>
+                            <td className="p-4 text-right">{money(row.net_sales)}</td>
+                          </tr>
+                        ))}
+                        {users.length === 0 && (
+                          <tr><td colSpan={4} className="p-8 text-center text-slate-500">Belum ada data pengguna.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
                 <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-6">
                     <div>
@@ -699,7 +744,7 @@ export default function SalesDashboardPage() {
                   iSeller dan belum dikurangi HPP,
                   biaya marketplace, maupun iklan.
                   Data POS yang belum teridentifikasi
-                  tetap dipisahkan dari Bazar/Event.
+                  tetap dipisahkan dari Bazar/Event; Pengguna lama mungkin belum tersedia.
                 </p>
               </>
             )}
