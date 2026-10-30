@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import { lifecycleLabel } from "@/utils/productionLifecycleLabels";
 import { createClient } from "@/utils/supabase/client";
 import { wmsToast } from "@/utils/wmsNotifications";
 import { productionIsRestricted, productionPolicyLabel } from "./productionSafety";
@@ -726,7 +727,7 @@ export default function ProductionPlanningPage() {
                         <option value="BLOCKED_HOLD">Hold - Blocked</option>
                         <option value="BLOCKED_DISCONTINUE">Discontinue - Blocked</option>
                         <option value="SEASONAL_APPROVAL_REQUIRED">Seasonal - Approval</option>
-                        <option value="ACTIVE_SIMULATION_ONLY">On Produksi</option>
+                        <option value="ACTIVE_SIMULATION_ONLY">Aktif (Regular)</option>
                       </select>
                       <select
                         value={sortBy}
@@ -816,7 +817,7 @@ export default function ProductionPlanningPage() {
 
                             <td className="px-4 py-3">
                               <div className="font-semibold">
-                                {item.vendor_lifecycle_status ?? "Perlu review"}
+                                {lifecycleLabel(item.vendor_lifecycle_status)}
                               </div>
                               <div className={
                                 "mt-1 text-[11px] " +
