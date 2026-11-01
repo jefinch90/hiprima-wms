@@ -34,6 +34,7 @@ export default function ProductionOrdersPage() {
   const [poNumber,setPoNumber]=useState("");
   const [poDate,setPoDate]=useState(nowDate());
   const [poEta,setPoEta]=useState("");
+  const [etaDraft,setEtaDraft]=useState<Record<string,string>>({});
   const [groupKey,setGroupKey]=useState("");
   const [sku,setSku]=useState("");
   const [qty,setQty]=useState("");
@@ -148,7 +149,13 @@ export default function ProductionOrdersPage() {
                 <select className={soft} disabled={busy||!['DRAFT','FINAL'].includes(l.po_status)} value={l.progress} onChange={e=>void run("Update progres",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:e.target.value,p_eta_date:null});})}><option value="UNCONFIRMED">Belum Dikonfirmasi</option><option value="IN_PRODUCTION">Dalam Produksi</option><option value="READY_AT_VENDOR">Ready at Vendor</option><option value="IN_TRANSIT">Dalam Pengiriman</option></select>
                 {l.po_status==="DRAFT" && <button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Qty PO untuk "+l.source_sku+" (angka positif):",String(l.ordered_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>0)void run("Update Qty PO",async()=>{await call("wms_po_set_draft_qty",{p_line_id:l.id,p_qty:Number(value)});});}}>Ubah Qty PO</button>}
                 {owner && (l.po_status==="DRAFT"||l.po_status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Total qty DIBATALKAN (bukan tambahan), maksimum "+(l.ordered_qty-l.received_qty)+" pcs:",String(l.cancelled_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>=0)void run("Update pembatalan",async()=>{await call("wms_po_cancel_qty",{p_line_id:l.id,p_cancel_qty:Number(value)});});}}>Qty Batal</button>}
-                {(l.po_status==="DRAFT"||l.po_status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Tanggal estimasi tiba YYYY-MM-DD (kosongkan untuk tidak mengubah)",l.eta_date||"");if(value&&/^\d{4}-\d{2}-\d{2}$/.test(value))void run("Update ETA",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:l.progress,p_eta_date:value});});}}>Ubah ETA</button>}
+                {(l.po_status==="DRAFT"||l.po_status==="FINAL")&&<span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                  <label className="text-xs text-slate-600" htmlFor={`po-eta-${l.id}`}>ETA</label>
+                  <input id={`po-eta-${l.id}`} aria-label={`Tanggal estimasi tiba untuk ${l.source_sku}`} title="Klik untuk memilih tanggal kedatangan" type="date" className={soft+" min-w-[158px] max-w-[190px]"} value={etaDraft[l.id]??l.eta_date??""}
+                    onChange={e=>setEtaDraft(d=>({...d,[l.id]:e.target.value}))}
+                    onClick={e=>{try{e.currentTarget.showPicker?.();}catch{}}}/>
+                  <button className={soft} disabled={busy||!etaDraft[l.id]||etaDraft[l.id]===l.eta_date} onClick={()=>{const date=etaDraft[l.id];if(!date||!/^\d{4}-\d{2}-\d{2}$/.test(date)){setError("Pilih tanggal estimasi dari kalender.");return;}void run("Simpan ETA",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:l.progress,p_eta_date:date});setEtaDraft(d=>{const next={...d};delete next[l.id];return next;});});}}>Simpan ETA</button>
+                </span>}
                 {l.po_status==="DRAFT" && !l.variant_id&&<button className={soft} onClick={()=>{setMapLineId(l.id);setSku(l.source_sku);setTab("po");}}>Mapping SKU</button>}
                 {l.po_status==="DRAFT"&&owner&&l.verified_vendor_lifecycle==="Seasonal"&&(l.seasonal_approved_at?<span className="text-xs font-semibold text-emerald-700">Seasonal disetujui</span>:<button className={soft} disabled={busy} onClick={()=>void run("Approval Seasonal",async()=>{await call("wms_po_approve_seasonal",{p_line_id:l.id});})}>Approval Seasonal</button>)}
                 {l.po_status==="FINAL"&&l.variant_id&&<button className={soft} disabled={busy} onClick={()=>void run("Cari Inbound",async()=>{const a=await call("wms_po_inbound_candidates",{p_line_id:l.id});setCandidates(x=>({...x,[l.id]:(a||[]) as Candidate[]}));})}>Cari Inbound</button>}
