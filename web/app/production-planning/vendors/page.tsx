@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
 import { lifecycleLabel } from "@/utils/productionLifecycleLabels";
 import { createClient } from "@/utils/supabase/client";
 import { wmsToast, wmsConfirm } from "@/utils/wmsNotifications";
@@ -238,9 +237,6 @@ export default function VendorManagementPage() {
 
   const resetPage = () => setPage(1);
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
-      <div className="flex min-h-screen w-full max-w-full">
-        <Sidebar />
         <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-8">
           <div className="mx-auto w-full min-w-0 max-w-[1500px] space-y-5">
             <header className="flex flex-wrap items-start justify-between gap-3">
@@ -377,7 +373,5 @@ export default function VendorManagementPage() {
             <p className="pb-4 text-xs text-slate-500">Vendor source: snapshot impor terbaru. Perubahan parameter hanya memengaruhi Master Vendor, bukan stok, histori sales, forecast aktif, atau PO.</p>
           </div>
         </main>
-      </div>
-    </div>
   );
 }

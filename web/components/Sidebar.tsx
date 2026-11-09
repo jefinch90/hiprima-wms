@@ -15,6 +15,23 @@ type Profile = {
   is_active: boolean;
 };
 
+type NavigationLink = {
+  label: string;
+  href: string;
+  visible: boolean;
+  simulation?: boolean;
+  exact?: boolean;
+};
+
+type NavigationGroup = {
+  label: string;
+  key: string;
+  visible: boolean;
+  children: NavigationLink[];
+};
+
+type NavigationItem = NavigationLink | NavigationGroup;
+
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
   admin: "Admin",
@@ -26,6 +43,9 @@ const ROLE_LABELS: Record<string, string> = {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const isProductionPlanningPath =
+    pathname === "/production-planning" ||
+    pathname.startsWith("/production-planning/");
 
   const supabase = useMemo(
     () => createClient(),
@@ -37,6 +57,12 @@ export default function Sidebar() {
 
   const [mobileOpen, setMobileOpen] =
     useState(false);
+  const [productionPlanningToggle, setProductionPlanningToggle] =
+    useState<{ pathname: string; open: boolean } | null>(null);
+  const productionPlanningOpen =
+    productionPlanningToggle?.pathname === pathname
+      ? productionPlanningToggle.open
+      : isProductionPlanningPath;
 
   useEffect(() => {
     let mounted = true;
@@ -99,7 +125,12 @@ export default function Sidebar() {
 
   const role = profile?.role ?? "";
 
-  const navItems = [
+  const canAccessProductionPlanning =
+    role === "owner" ||
+    role === "admin" ||
+    role === "warehouse_manager";
+
+  const navItems: NavigationItem[] = [
     {
       label: "Dashboard",
       href: "/",
@@ -134,27 +165,32 @@ export default function Sidebar() {
     },
     {
       label: "Production Planning",
-      href: "/production-planning",
-      visible:
-        role === "owner" ||
-        role === "admin" ||
-        role === "warehouse_manager",
-    },
-    {
-      label: "Production Orders",
-      href: "/production-planning/orders",
-      visible:
-        role === "owner" ||
-        role === "admin" ||
-        role === "warehouse_manager",
-    },
-    {
-      label: "Vendor Management",
-      href: "/production-planning/vendors",
-      visible:
-        role === "owner" ||
-        role === "admin" ||
-        role === "warehouse_manager",
+      key: "production-planning",
+      visible: canAccessProductionPlanning,
+      children: [
+        {
+          label: "Dashboard & Simulasi",
+          href: "/production-planning/",
+          visible: true,
+          exact: true,
+        },
+        {
+          label: "Review & Approval",
+          href: "/production-planning/v4/review/",
+          visible: true,
+          simulation: true,
+        },
+        {
+          label: "Production Orders",
+          href: "/production-planning/orders/",
+          visible: true,
+        },
+        {
+          label: "Vendor Management",
+          href: "/production-planning/vendors/",
+          visible: true,
+        },
+      ],
     },
     {
       label: "Locations",
@@ -170,17 +206,12 @@ export default function Sidebar() {
     },
   ];
 
-  function activeMenu(href: string) {
-    if (href === "/") {
-      return pathname === "/";
-    }
-
-    return (
-      pathname === href ||
-      pathname.startsWith(
-        `${href}/`
-      )
-    );
+  function activeMenu(href: string, exact = false) {
+    const currentPath = pathname.replace(/\/+$/, "") || "/";
+    const targetPath = href.replace(/\/+$/, "") || "/";
+    if (exact) return currentPath === targetPath;
+    return currentPath === targetPath ||
+      (targetPath !== "/" && currentPath.startsWith(`${targetPath}/`));
   }
 
   async function handleLogout() {
@@ -192,7 +223,9 @@ export default function Sidebar() {
     router.refresh();
   }
 
-  function MenuContent() {
+  function renderMenuContent(instance: "desktop" | "mobile") {
+    const planningSubmenuId = `production-planning-submenu-${instance}`;
+
     return (
       <>
         <div className="border-b border-slate-200 px-5 py-6">
@@ -211,6 +244,77 @@ export default function Sidebar() {
               (item) => item.visible
             )
             .map((item) => {
+              if ("children" in item) {
+                const active = isProductionPlanningPath;
+
+                return (
+                  <div key={item.key} className="min-w-0">
+                    <button
+                      type="button"
+                      aria-expanded={productionPlanningOpen}
+                      aria-controls={planningSubmenuId}
+                      onClick={() =>
+                        setProductionPlanningToggle({
+                          pathname,
+                          open: !productionPlanningOpen,
+                        })
+                      }
+                      className={
+                        active
+                          ? "flex w-full min-w-0 items-center justify-between gap-2 rounded-xl bg-slate-900 px-4 py-3 text-left text-sm font-semibold text-white"
+                          : "flex w-full min-w-0 items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      }
+                    >
+                      <span className="min-w-0 break-words">
+                        {item.label}
+                      </span>
+                      <span aria-hidden="true" className="shrink-0">
+                        {productionPlanningOpen ? "−" : "+"}
+                      </span>
+                    </button>
+
+                    {productionPlanningOpen && (
+                      <div
+                        id={planningSubmenuId}
+                        className="ml-3 mt-1 min-w-0 space-y-1 border-l border-slate-200 pl-3"
+                      >
+                        {item.children.map((child) => {
+                          const childActive = activeMenu(
+                            child.href,
+                            child.exact
+                          );
+
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              aria-current={
+                                childActive ? "page" : undefined
+                              }
+                              onClick={() => setMobileOpen(false)}
+                              className={
+                                childActive
+                                  ? "flex min-w-0 items-center justify-between gap-2 rounded-lg bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-900 ring-1 ring-inset ring-indigo-200"
+                                  : "flex min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                              }
+                            >
+                              <span className="min-w-0 break-words">
+                                {child.label}
+                              </span>
+                              {child.simulation && (
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                                  Simulasi
+                                </span>
+                              )}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               const active =
                 activeMenu(item.href);
 
@@ -262,7 +366,7 @@ export default function Sidebar() {
   return (
     <>
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col overflow-hidden border-r border-slate-200 bg-white lg:flex">
-        <MenuContent />
+        {renderMenuContent("desktop")}
       </aside>
 
       <button
@@ -301,7 +405,7 @@ export default function Sidebar() {
               </button>
             </div>
 
-            <MenuContent />
+            {renderMenuContent("mobile")}
           </aside>
         </div>
       )}

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
 import { lifecycleLabel } from "@/utils/productionLifecycleLabels";
 import { createClient } from "@/utils/supabase/client";
 import { wmsToast } from "@/utils/wmsNotifications";
@@ -425,10 +424,6 @@ export default function ProductionPlanningPage() {
     "focus:border-slate-800";
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
-      <div className="flex min-h-screen w-full max-w-full">
-        <Sidebar />
-
         <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-8">
           <div className="mx-auto w-full min-w-0 max-w-[1500px] space-y-6">
 
@@ -939,7 +934,5 @@ export default function ProductionPlanningPage() {
             )}
           </div>
         </main>
-      </div>
-    </div>
   );
 }

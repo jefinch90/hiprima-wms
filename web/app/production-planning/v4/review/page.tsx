@@ -1155,8 +1155,9 @@ export default function ProductionReviewV42() {
         </section>
 
         {/* V42E_FLOATING_ACTIONS */}
-        <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[40vh] overflow-y-auto border-t border-slate-300 bg-white px-4 py-3 shadow-2xl md:px-8">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="fixed inset-x-0 bottom-0 z-50 max-h-[40vh] min-w-0 overflow-x-hidden overflow-y-auto border-t border-slate-300 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-2xl sm:px-4 md:px-8 lg:left-64">
+          <div className="mx-auto w-full min-w-0 max-w-[1600px]">
+          <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold text-slate-900">
                 Review Produksi - Panel Aksi
@@ -1170,7 +1171,7 @@ export default function ProductionReviewV42() {
               MODE SIMULASI
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => void saveAll()}
@@ -1216,6 +1217,7 @@ export default function ProductionReviewV42() {
             >
               Ajukan Approval — Belum Aktif
             </button>
+          </div>
           </div>
         </div>
         <section className="min-w-0 rounded-xl border border-slate-200 bg-white">

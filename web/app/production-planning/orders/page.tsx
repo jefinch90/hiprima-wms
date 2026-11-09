@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
 import { lifecycleLabel } from "@/utils/productionLifecycleLabels";
 import { createClient } from "@/utils/supabase/client";
 
@@ -113,9 +112,7 @@ export default function ProductionOrdersPage() {
   const inp="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm";
   const soft="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40";
 
-  return <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 lg:flex">
-    <Sidebar/>
-    <main className="min-w-0 flex-1 p-4 md:p-6 lg:p-8">
+  return <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-7xl min-w-0 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h1 className="text-2xl font-bold">Production Order & Incoming</h1><p className="text-sm text-slate-500">PO Final, Ready at Vendor, pengiriman, dan penerimaan WMS</p></div>
@@ -167,6 +164,5 @@ export default function ProductionOrdersPage() {
           </>}
         </>}
       </div>
-    </main>
-  </div>;
+  </main>;
 }
