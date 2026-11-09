@@ -19,6 +19,12 @@ type SimEvent = {
   actor_id: string;
   notes: string | null;
   created_at: string;
+  request_id?: string;
+};
+
+type ActorProfile = {
+  full_name: string | null;
+  role: string | null;
 };
 
 type ReviewLine = {
@@ -56,11 +62,20 @@ type Props = {
 
 const dateTime = (value: string | null) =>
   value
-    ? new Date(value).toLocaleString("id-ID", {
+    ? `${new Date(value).toLocaleString("id-ID", {
         dateStyle: "medium",
         timeStyle: "short",
-      })
+        timeZone: "Asia/Jakarta",
+      })} WIB`
     : "—";
+
+const roleLabels: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  warehouse_manager: "Warehouse Manager",
+  warehouse_staff: "Warehouse Staff",
+  viewer: "Viewer",
+};
 
 const statusLabels: Record<string, string> = {
   SUBMITTED: "Menunggu Persetujuan",
@@ -139,6 +154,13 @@ export default function SimulationApprovalPanel({
   const [requests, setRequests] = useState<SimRequest[]>([]);
   const [details, setDetails] = useState<Record<string, ReviewDetail>>({});
   const [history, setHistory] = useState<Record<string, HistoryState>>({});
+  const [actorProfiles, setActorProfiles] = useState<
+    Record<string, ActorProfile>
+  >({});
+  const [decisionActors, setDecisionActors] = useState<
+    Record<string, SimEvent>
+  >({});
+  const [identityError, setIdentityError] = useState("");
   const [openDetailId, setOpenDetailId] = useState<string | null>(null);
   const [openHistoryId, setOpenHistoryId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("SUBMITTED");
@@ -159,6 +181,9 @@ export default function SimulationApprovalPanel({
     setAuthorizationError("");
     setRequests([]);
     setDetails({});
+    setActorProfiles({});
+    setDecisionActors({});
+    setIdentityError("");
 
     try {
       const db = createClient();
@@ -202,6 +227,81 @@ export default function SimulationApprovalPanel({
       setRequests(loadedRequests);
 
       if (loadedRequests.length === 0) return;
+
+      const decidedRequests = loadedRequests.filter(
+        (request) =>
+          request.status === "APPROVED" || request.status === "REJECTED"
+      );
+      let decisionEventRows: SimEvent[] = [];
+
+      if (decidedRequests.length > 0) {
+        const { data: eventData, error: eventError } = await db
+          .from("wms_sim_approval_events")
+          .select("id,action,actor_id,notes,created_at,request_id")
+          .in(
+            "request_id",
+            decidedRequests.map((request) => request.id)
+          )
+          .order("created_at", { ascending: false });
+
+        if (eventError) {
+          setIdentityError(
+            `Identitas pengambil keputusan tidak dapat dimuat: ${eventError.message}`
+          );
+        } else {
+          decisionEventRows = (eventData ?? []) as SimEvent[];
+          const decisionEventByRequest: Record<string, SimEvent> = {};
+
+          for (const request of decidedRequests) {
+            const event = decisionEventRows.find(
+              (row) =>
+                row.request_id === request.id &&
+                row.action.toUpperCase() === request.status
+            );
+            if (event) decisionEventByRequest[request.id] = event;
+          }
+
+          setDecisionActors(decisionEventByRequest);
+        }
+      }
+
+      const actorIds = [
+        ...new Set(
+          [
+            ...loadedRequests.map((request) => request.requested_by),
+            ...decisionEventRows.map((event) => event.actor_id),
+          ].filter((actorId): actorId is string => !!actorId)
+        ),
+      ];
+
+      if (actorIds.length > 0) {
+        const { data: profiles, error: profilesError } = await db
+          .from("profiles")
+          .select("id,full_name,role")
+          .in("id", actorIds);
+
+        if (profilesError) {
+          setIdentityError(
+            isAccessError(profilesError)
+              ? "Akses membaca nama dan jabatan aktor ditolak oleh kebijakan profil. Nama pengguna belum dilengkapi."
+              : `Identitas pengguna gagal dimuat: ${profilesError.message}`
+          );
+        } else {
+          const identities = (profiles ?? []) as Array<
+            ActorProfile & { id: string }
+          >;
+          if (identities.length < actorIds.length) {
+            setIdentityError(
+              "Sebagian identitas tidak tersedia atau dibatasi oleh kebijakan RLS. Nama pengguna belum dilengkapi."
+            );
+          }
+          setActorProfiles(
+            Object.fromEntries(
+              identities.map(({ id, ...profile }) => [id, profile])
+            )
+          );
+        }
+      }
 
       const batchIds = [...new Set(loadedRequests.map((item) => item.batch_id))];
       const lines: ReviewLine[] = [];
@@ -323,10 +423,49 @@ export default function SimulationApprovalPanel({
 
         if (queryError) throw new Error(queryError.message);
 
+        const loadedEvents = (data ?? []) as SimEvent[];
+        const actorIds = [
+          ...new Set(
+            loadedEvents
+              .map((event) => event.actor_id)
+              .filter((actorId): actorId is string => !!actorId)
+          ),
+        ];
+
+        if (actorIds.length > 0) {
+          const { data: profiles, error: profilesError } = await db
+            .from("profiles")
+            .select("id,full_name,role")
+            .in("id", actorIds);
+
+          if (profilesError) {
+            setIdentityError(
+              isAccessError(profilesError)
+                ? "Akses membaca nama dan jabatan aktor ditolak oleh kebijakan profil. Nama pengguna belum dilengkapi."
+                : `Identitas pengguna gagal dimuat: ${profilesError.message}`
+            );
+          } else {
+            const identities = (profiles ?? []) as Array<
+              ActorProfile & { id: string }
+            >;
+            if (identities.length < actorIds.length) {
+              setIdentityError(
+                "Sebagian identitas tidak tersedia atau dibatasi oleh kebijakan RLS. Nama pengguna belum dilengkapi."
+              );
+            }
+            setActorProfiles((previous) => ({
+              ...previous,
+              ...Object.fromEntries(
+                identities.map(({ id, ...profile }) => [id, profile])
+              ),
+            }));
+          }
+        }
+
         setHistory((previous) => ({
           ...previous,
           [requestId]: {
-            events: (data ?? []) as SimEvent[],
+            events: loadedEvents,
             loading: false,
           },
         }));
@@ -349,6 +488,16 @@ export default function SimulationApprovalPanel({
   }, [loadData, batchId]);
 
   const active = requests.find((request) => request.batch_id === batchId);
+
+  function actorName(actorId: string | null | undefined) {
+    const fullName = actorId ? actorProfiles[actorId]?.full_name?.trim() : "";
+    return fullName || "Nama pengguna belum dilengkapi";
+  }
+
+  function actorRole(actorId: string | null | undefined) {
+    const role = actorId ? actorProfiles[actorId]?.role : null;
+    return role ? roleLabels[role] ?? role : "Jabatan belum tersedia";
+  }
 
   const visibleRequests = useMemo(() => {
     const statusOrder: Record<string, number> = {
@@ -641,6 +790,11 @@ export default function SimulationApprovalPanel({
             Memuat daftar pengajuan...
           </p>
         )}
+        {identityError && (
+          <p role="status" className="mt-3 break-words text-sm text-amber-800">
+            {identityError}
+          </p>
+        )}
 
         {!loading && !listError && visibleRequests.length === 0 && (
           <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
@@ -693,13 +847,41 @@ export default function SimulationApprovalPanel({
                         <dd>{dateTime(request.requested_at)}</dd>
                       </div>
                       <div className="min-w-0">
-                        <dt className="text-xs text-slate-500">Pengaju</dt>
-                        <dd className="break-all">
-                          {request.requested_by
-                            ? request.requested_by.slice(0, 8)
-                            : "Tidak tersedia"}
-                        </dd>
+                        <dt className="text-xs text-slate-500">
+                          Diajukan oleh
+                        </dt>
+                        <dd>{actorName(request.requested_by)}</dd>
+                        <dt className="mt-1 text-xs text-slate-500">
+                          Jabatan
+                        </dt>
+                        <dd>{actorRole(request.requested_by)}</dd>
                       </div>
+                      {request.status !== "SUBMITTED" && (
+                        <div className="min-w-0">
+                          <dt className="text-xs text-slate-500">
+                            Diputuskan oleh
+                          </dt>
+                          <dd>
+                            {actorName(decisionActors[request.id]?.actor_id)}
+                          </dd>
+                          <dt className="mt-1 text-xs text-slate-500">
+                            Jabatan pengambil keputusan
+                          </dt>
+                          <dd>
+                            {actorRole(decisionActors[request.id]?.actor_id)}
+                          </dd>
+                          <dt className="mt-1 text-xs text-slate-500">
+                            Tanggal dan jam keputusan
+                          </dt>
+                          <dd>
+                            {dateTime(
+                              request.decided_at ??
+                                decisionActors[request.id]?.created_at ??
+                                null
+                            )}
+                          </dd>
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <dt className="text-xs text-slate-500">
                           Referensi Draft
@@ -917,7 +1099,10 @@ export default function SimulationApprovalPanel({
                                     {event.action} — {dateTime(event.created_at)}
                                   </p>
                                   <p className="break-all text-slate-600">
-                                    Aktor: {event.actor_id || "Tidak tersedia"}
+                                    Aktor: {actorName(event.actor_id)}
+                                  </p>
+                                  <p className="text-slate-600">
+                                    Jabatan: {actorRole(event.actor_id)}
                                   </p>
                                   {event.notes && (
                                     <p className="whitespace-pre-wrap break-words">
