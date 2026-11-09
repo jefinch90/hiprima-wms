@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import SimulationApprovalPanel from "./SimulationApprovalPanel";
 import { createClient } from "@/utils/supabase/client";
 
 type Decision = "PROPOSE" | "HOLD" | "EXCLUDE";
@@ -43,6 +44,8 @@ type SavedLine = {
   proposed_qty: number;
   review_notes: string | null;
 };
+
+type SkuSaveState = "saving" | "failed";
 
 type ReadinessV1 = {
   batch_id: string;
@@ -98,12 +101,83 @@ const fmt = (value: unknown) => {
   }).format(Number(value));
 };
 
+function sameEdit(left: Edit | undefined, right: Edit | undefined) {
+  return (
+    left === right ||
+    (!!left &&
+      !!right &&
+      left.decision === right.decision &&
+      left.qty === right.qty &&
+      left.notes === right.notes)
+  );
+}
+
+function hasUnsavedEdits(
+  edits: Record<string, Edit>,
+  savedEdits: Record<string, Edit>
+) {
+  const ids = new Set([
+    ...Object.keys(edits),
+    ...Object.keys(savedEdits),
+  ]);
+
+  return [...ids].some((id) => !sameEdit(edits[id], savedEdits[id]));
+}
+
+function getChangedEdits(
+  edits: Record<string, Edit>,
+  savedEdits: Record<string, Edit>
+) {
+  return Object.entries(edits).filter(
+    ([id, edit]) => !sameEdit(edit, savedEdits[id])
+  );
+}
+
+function getReturnedBatchId(data: unknown, currentBatchId: string | null) {
+  let returnedBatchId: string | null = null;
+  const result =
+    Array.isArray(data) && data.length === 1 ? data[0] : data;
+
+  if (
+    result &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    "batch_id" in result &&
+    typeof result.batch_id === "string"
+  ) {
+    returnedBatchId = result.batch_id;
+  } else if (typeof result === "string") {
+    returnedBatchId = result;
+  }
+
+  if (
+    returnedBatchId &&
+    currentBatchId &&
+    returnedBatchId !== currentBatchId
+  ) {
+    throw new Error("RPC mengembalikan batch_id yang berbeda.");
+  }
+
+  const batchId = returnedBatchId || currentBatchId;
+  if (!batchId) {
+    throw new Error("RPC tidak mengembalikan batch_id Draft.");
+  }
+
+  return batchId;
+}
+
 export default function ProductionReviewV42() {
   const [items, setItems] = useState<PlanningItem[]>([]);
   const [edits, setEdits] = useState<Record<string, Edit>>({});
+  const [savedEdits, setSavedEdits] = useState<Record<string, Edit>>({});
+  const [skuSaveStates, setSkuSaveStates] = useState<
+    Record<string, SkuSaveState>
+  >({});
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [savedNotes, setSavedNotes] = useState("");
+  const [hasSimulationRequest, setHasSimulationRequest] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [complete, setComplete] = useState(false);
@@ -116,6 +190,7 @@ export default function ProductionReviewV42() {
   const [checkingReadiness, setCheckingReadiness] = useState(false);
   const [checking, setChecking] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const savingLock = useRef(false);
 
   async function requireUser() {
     const db = createClient();
@@ -141,6 +216,103 @@ export default function ProductionReviewV42() {
     if (queryError) throw new Error(queryError.message);
 
     setDrafts((data ?? []) as Draft[]);
+  }
+
+  async function assertEditableBatch(
+    db: Awaited<ReturnType<typeof requireUser>>,
+    id: string
+  ) {
+    const { data: batch, error: batchError } = await db
+      .from("wms_production_review_batches")
+      .select("id,status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (batchError) throw new Error(batchError.message);
+    if (!batch || batch.status !== "DRAFT") {
+      throw new Error("Draft tidak tersedia untuk diedit.");
+    }
+
+    const { data: requests, error: requestError } = await db
+      .from("wms_sim_approval_requests")
+      .select("id")
+      .eq("batch_id", id)
+      .limit(1);
+
+    if (requestError) throw new Error(requestError.message);
+    if ((requests ?? []).length > 0) {
+      setHasSimulationRequest(true);
+      throw new Error(
+        "Draft sudah memiliki pengajuan simulasi dan tidak dapat diedit."
+      );
+    }
+  }
+
+  function validateSkuEdit(item: PlanningItem | undefined, edit: Edit) {
+    if (!item) throw new Error("SKU tidak valid pada preview V4.");
+
+    if (
+      edit.decision === "PROPOSE" &&
+      (!Number.isSafeInteger(edit.qty) ||
+        edit.qty <= 0 ||
+        edit.qty > 100000)
+    ) {
+      throw new Error(
+        `Qty produksi ${item.sku_master} harus bilangan bulat positif.`
+      );
+    }
+
+    if (!["PROPOSE", "HOLD", "EXCLUDE"].includes(edit.decision)) {
+      throw new Error("Status keputusan tidak valid.");
+    }
+
+    return edit.decision === "PROPOSE" ? edit.qty : 0;
+  }
+
+  async function persistSku(
+    db: Awaited<ReturnType<typeof requireUser>>,
+    currentBatchId: string | null,
+    variantId: string,
+    edit: Edit,
+    qty: number,
+    onBatchId: (id: string) => void
+  ) {
+    const { data, error: rpcError } = await db.rpc(
+      "wms_save_review_sku_v42f_v2",
+      {
+        p_batch_id: currentBatchId,
+        p_variant_id: variantId,
+        p_decision: edit.decision,
+        p_qty: qty,
+        p_notes: edit.notes || null,
+      }
+    );
+
+    if (rpcError) throw new Error(rpcError.message);
+
+    const id = getReturnedBatchId(data, currentBatchId);
+    onBatchId(id);
+
+    const { data: line, error: lineError } = await db
+      .from("wms_production_review_lines")
+      .select("variant_id,decision,proposed_qty,review_notes")
+      .eq("batch_id", id)
+      .eq("variant_id", variantId)
+      .maybeSingle();
+
+    if (lineError) throw new Error(lineError.message);
+    if (
+      !line ||
+      line.decision !== edit.decision ||
+      number(line.proposed_qty) !== qty ||
+      (line.review_notes ?? "") !== edit.notes
+    ) {
+      throw new Error(
+        "Isi SKU hasil simpan tidak cocok dengan perubahan terakhir."
+      );
+    }
+
+    return id;
   }
 
   async function loadPreview() {
@@ -200,8 +372,12 @@ export default function ProductionReviewV42() {
       setReadiness(null);
       setDirty(false);
       setEdits({});
+      setSavedEdits({});
+      setSkuSaveStates({});
       setBatchId(null);
       setNotes("");
+      setSavedNotes("");
+      setHasSimulationRequest(false);
       setPage(0);
       setComplete(true);
 
@@ -245,7 +421,7 @@ export default function ProductionReviewV42() {
     });
   }, [eligible, search]);
 
-  const pageSize = 20;
+  const pageSize = 10;
   const pages = Math.max(1, Math.ceil(visible.length / pageSize));
   const currentPage = Math.min(page, pages - 1);
   const shown = visible.slice(
@@ -257,18 +433,22 @@ export default function ProductionReviewV42() {
     item: PlanningItem,
     value: string
   ) {
-    setDirty(true);
+    if (busy || hasSimulationRequest) return;
+
+    if (
+      !value &&
+      savedEdits[item.variant_id]
+    ) {
+      return;
+    }
+
     setPreflight(null);
-    setEdits((previous) => {
-      const next = { ...previous };
+    const next = { ...edits };
 
-      if (!value) {
-        delete next[item.variant_id];
-        return next;
-      }
-
+    if (!value) {
+      delete next[item.variant_id];
+    } else {
       const old = next[item.variant_id];
-
       next[item.variant_id] = {
         decision: value as Decision,
         qty:
@@ -279,26 +459,42 @@ export default function ProductionReviewV42() {
             : 0,
         notes: old?.notes ?? "",
       };
+    }
 
-      return next;
+    setEdits(next);
+    setSkuSaveStates((previous) => {
+      const updated = { ...previous };
+      delete updated[item.variant_id];
+      return updated;
     });
+    setDirty(
+      hasUnsavedEdits(next, savedEdits) || notes !== savedNotes
+    );
   }
 
   function updateEdit(
     id: string,
     patch: Partial<Edit>
   ) {
-    setDirty(true);
-    setPreflight(null);
-    setEdits((previous) => {
-      const current = previous[id];
-      if (!current) return previous;
+    if (busy || hasSimulationRequest) return;
 
-      return {
-        ...previous,
-        [id]: { ...current, ...patch },
-      };
+    const current = edits[id];
+    if (!current) return;
+
+    setPreflight(null);
+    const next = {
+      ...edits,
+      [id]: { ...current, ...patch },
+    };
+    setEdits(next);
+    setSkuSaveStates((previous) => {
+      const updated = { ...previous };
+      delete updated[id];
+      return updated;
     });
+    setDirty(
+      hasUnsavedEdits(next, savedEdits) || notes !== savedNotes
+    );
   }
 
   const selected = useMemo(() => {
@@ -313,6 +509,13 @@ export default function ProductionReviewV42() {
     (sum, [, e]) => sum + number(e.qty),
     0
   );
+  const changedEdits = useMemo(
+    () => getChangedEdits(edits, savedEdits),
+    [edits, savedEdits]
+  );
+  const canSaveAll =
+    changedEdits.length > 0 ||
+    (!!batchId && notes !== savedNotes);
 
   const groupReview = useMemo(() => {
     const byId = new Map(items.map((r) => [r.variant_id, r]));
@@ -470,193 +673,263 @@ export default function ProductionReviewV42() {
     }
   }
 
-  async function saveDraft() {
-    if (!complete || saving || loading) return;
+  async function saveSku(variantId: string) {
+    if (
+      !complete ||
+      busy ||
+      savingLock.current ||
+      hasSimulationRequest
+    ) {
+      return;
+    }
 
+    const edit = edits[variantId];
+    if (!edit || sameEdit(edit, savedEdits[variantId])) return;
+
+    const item = eligible.find((row) => row.variant_id === variantId);
+    let qty: number;
+
+    try {
+      qty = validateSkuEdit(item, edit);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Data SKU tidak valid.");
+      return;
+    }
+
+    savingLock.current = true;
     setSaving(true);
     setError("");
     setPreflight(null);
     setReadiness(null);
-    setMessage("Menyimpan Draft Review...");
+    setSkuSaveStates((previous) => ({
+      ...previous,
+      [variantId]: "saving",
+    }));
+    setMessage(`Menyimpan SKU ${item?.sku_master ?? variantId}...`);
 
     try {
       const db = await requireUser();
-
-      if (selected.length === 0) {
-        throw new Error(
-          "Pilih minimal satu SKU untuk direview."
-        );
-      }
-
-      const byId = new Map(
-        eligible.map((r) => [r.variant_id, r])
-      );
-
-      const payload = selected.map(([id, edit]) => {
-        const item = byId.get(id);
-
-        if (!item) {
-          throw new Error(`SKU ${id} tidak valid pada V4.`);
-        }
-
-        if (
-          edit.decision === "PROPOSE" &&
-          (!Number.isSafeInteger(edit.qty) ||
-            edit.qty <= 0 ||
-            edit.qty > 100000)
-        ) {
-          throw new Error(
-            `Qty produksi ${item.sku_master} harus bilangan bulat positif.`
-          );
-        }
-
-        if (!["PROPOSE", "HOLD", "EXCLUDE"].includes(edit.decision)) {
-          throw new Error("Status keputusan tidak valid.");
-        }
-
-        const type = String(item.vendor_moq_type ?? "");
-        const color =
-          type === "PER_COLOR"
-            ? String(item.color ?? "").toUpperCase()
-            : "SEMUA_WARNA";
-
-        return {
-          variant_id: item.variant_id,
-          sku_snapshot: item.sku_master,
-          product_code: item.product_code,
-          color_snapshot: item.color ?? null,
-          vendor_name_snapshot: item.vendor_name ?? null,
-          moq_type: type || null,
-          moq_quantity: item.vendor_moq_quantity ?? null,
-          moq_group_key: JSON.stringify([
-            item.product_code,
-            item.vendor_name,
-            type,
-            color,
-          ]),
-          stock_normal_snapshot:
-            item.v4_stock_normal_units ?? null,
-          incoming_final_snapshot:
-            item.v4_incoming_po_final_units ?? null,
-          target_stock_snapshot:
-            item.target_stock_position_units ?? null,
-          net_need_snapshot:
-            item.v4_net_need_before_moq ?? null,
-          proposed_qty:
-            edit.decision === "PROPOSE" ? edit.qty : 0,
-          decision: edit.decision,
-          source_policy: item.production_policy ?? null,
-
-          // Belum lolos revalidasi approval di server.
-          review_flag: "DRAFT_REQUIRES_REVALIDATION",
-
-          review_notes: edit.notes || null,
-        };
-      });
-
       let id = batchId;
 
-      if (!id) {
-        const { data, error: insertError } = await db
-          .from("wms_production_review_batches")
-          .insert({
-            source_version: "V4.1",
-            lead_time_days: 30,
-            review_days: 7,
-            notes: notes || null,
-          })
-          .select("id")
-          .single();
+      if (id) await assertEditableBatch(db, id);
 
-        if (insertError || !data) {
-          throw new Error(
-            insertError?.message || "Gagal membuat Draft."
-          );
-        }
+      id = await persistSku(db, id, variantId, edit, qty, (nextId) => {
+        id = nextId;
+        setBatchId(nextId);
+      });
 
-        id = data.id;
-        setBatchId(id);
-      } else {
-        const { data, error: updateError } = await db
-          .from("wms_production_review_batches")
-          .update({ notes: notes || null })
-          .eq("id", id)
-          .eq("status", "DRAFT")
-          .select("id")
-          .single();
+      const nextSaved = { ...savedEdits, [variantId]: edit };
+      setSavedEdits(nextSaved);
+      setSkuSaveStates((previous) => {
+        const updated = { ...previous };
+        delete updated[variantId];
+        return updated;
+      });
+      setDirty(
+        hasUnsavedEdits(edits, nextSaved) || notes !== savedNotes
+      );
+      setMessage(`SKU ${item?.sku_master ?? variantId} tersimpan.`);
 
-        if (updateError || !data) {
-          throw new Error(
-            updateError?.message ||
-            "Draft tidak dapat diedit."
-          );
-        }
-      }
-
-      if (!id) throw new Error("ID Draft tidak tersedia.");
-
-      const lines = payload.map((row) => ({
-        ...row,
-        batch_id: id,
-      }));
-
-      for (let i = 0; i < lines.length; i += 100) {
-        const { error: lineError } = await db
-          .from("wms_production_review_lines")
-          .upsert(lines.slice(i, i + 100), {
-            onConflict: "batch_id,variant_id",
-          });
-
-        if (lineError) throw new Error(lineError.message);
-      }
-
-      const { data: existing, error: readError } = await db
-        .from("wms_production_review_lines")
-        .select("variant_id")
-        .eq("batch_id", id)
-        .range(0, 999);
-
-      if (readError) throw new Error(readError.message);
-
-      if ((existing ?? []).length >= 1000) {
-        throw new Error(
-          "Terlalu banyak baris Draft. Pemeriksaan diperlukan."
+      try {
+        await refreshDrafts();
+      } catch (e) {
+        setError(
+          `SKU tersimpan, tetapi daftar Draft gagal diperbarui: ${
+            e instanceof Error ? e.message : "kesalahan tidak diketahui"
+          }`
         );
       }
-
-      const currentIds = new Set(
-        payload.map((r) => r.variant_id)
+    } catch (e) {
+      setSkuSaveStates((previous) => ({
+        ...previous,
+        [variantId]: "failed",
+      }));
+      setDirty(true);
+      setError(
+        e instanceof Error ? e.message : "Gagal menyimpan SKU."
       );
+      setMessage("SKU gagal disimpan. Periksa dan coba lagi.");
+    } finally {
+      savingLock.current = false;
+      setSaving(false);
+    }
+  }
 
-      const obsolete = (existing ?? [])
-        .map((r) => String(r.variant_id))
-        .filter((variantId) => !currentIds.has(variantId));
+  async function saveAll() {
+    if (
+      !complete ||
+      busy ||
+      savingLock.current ||
+      hasSimulationRequest
+    ) {
+      return;
+    }
 
-      for (let i = 0; i < obsolete.length; i += 100) {
-        const { error: deleteError } = await db
-          .from("wms_production_review_lines")
-          .delete()
-          .eq("batch_id", id)
-          .in("variant_id", obsolete.slice(i, i + 100));
+    const work = [...changedEdits];
+    const byId = new Map(eligible.map((item) => [item.variant_id, item]));
+    const quantities = new Map<string, number>();
 
-        if (deleteError) throw new Error(deleteError.message);
+    try {
+      for (const [id, edit] of work) {
+        quantities.set(id, validateSkuEdit(byId.get(id), edit));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Data SKU tidak valid.");
+      return;
+    }
+
+    const saveBatchNotes = !!batchId && notes !== savedNotes;
+    if (work.length === 0 && !saveBatchNotes) return;
+
+    savingLock.current = true;
+    setSaving(true);
+    setError("");
+    setPreflight(null);
+    setReadiness(null);
+    setSkuSaveStates((previous) => {
+      const updated = { ...previous };
+      for (const [id] of work) updated[id] = "saving";
+      return updated;
+    });
+    setMessage("Menyimpan perubahan SKU...");
+
+    const nextSaved = { ...savedEdits };
+    const failures: string[] = [];
+    let savedCount = 0;
+    let id = batchId;
+    let nextSavedNotes = savedNotes;
+    let notesFailure = "";
+
+    try {
+      const db = await requireUser();
+      if (id) await assertEditableBatch(db, id);
+
+      for (const [variantId, edit] of work) {
+        const item = byId.get(variantId);
+
+        try {
+          if (id) await assertEditableBatch(db, id);
+          id = await persistSku(
+            db,
+            id,
+            variantId,
+            edit,
+            quantities.get(variantId) ?? 0,
+            (nextId) => {
+              id = nextId;
+              setBatchId(nextId);
+            }
+          );
+          nextSaved[variantId] = edit;
+          savedCount++;
+          setSkuSaveStates((previous) => {
+            const updated = { ...previous };
+            delete updated[variantId];
+            return updated;
+          });
+        } catch (e) {
+          const reason =
+            e instanceof Error ? e.message : "kesalahan tidak diketahui";
+          failures.push(`${item?.sku_master ?? variantId}: ${reason}`);
+          setSkuSaveStates((previous) => ({
+            ...previous,
+            [variantId]: "failed",
+          }));
+        }
       }
 
-      await refreshDrafts();
-      setDirty(false);
+      if (id && notes !== nextSavedNotes) {
+        try {
+          await assertEditableBatch(db, id);
+          const { data: updatedBatch, error: updateError } = await db
+            .from("wms_production_review_batches")
+            .update({ notes: notes || null })
+            .eq("id", id)
+            .eq("status", "DRAFT")
+            .select("id")
+            .maybeSingle();
 
-      setMessage(
-        `Draft berhasil disimpan: ${payload.length} SKU. ` +
-        `Belum diajukan dan belum membuat PO.`
+          if (updateError) throw new Error(updateError.message);
+          if (!updatedBatch) {
+            throw new Error("Draft tidak tersedia untuk diperbarui.");
+          }
+
+          nextSavedNotes = notes;
+        } catch (e) {
+          notesFailure =
+            e instanceof Error ? e.message : "kesalahan tidak diketahui";
+        }
+      } else if (work.length === 0 && notes !== nextSavedNotes) {
+        notesFailure = "ID Draft tidak tersedia untuk menyimpan catatan.";
+      }
+
+      setSavedEdits(nextSaved);
+      setSavedNotes(nextSavedNotes);
+      setDirty(
+        hasUnsavedEdits(edits, nextSaved) || notes !== nextSavedNotes
       );
+
+      if (failures.length > 0 || notesFailure) {
+        const failedSkuCount = failures.length;
+        setError(
+          [
+            failures.length > 0
+              ? `SKU gagal: ${failures.join(" | ")}`
+              : "",
+            notesFailure ? `Catatan Draft gagal: ${notesFailure}` : "",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+        if (failedSkuCount > 0) {
+          setMessage(
+            savedCount > 0
+              ? `Penyimpanan parsial: ${savedCount} SKU tersimpan, ` +
+                `${failedSkuCount} SKU gagal. Periksa daftar kegagalan.`
+              : `Penyimpanan gagal: 0 SKU tersimpan, ${failedSkuCount} SKU gagal.`
+          );
+        } else {
+          setMessage(
+            "Catatan Draft gagal disimpan; tidak ada SKU berubah."
+          );
+        }
+      } else if (savedCount > 0) {
+        setMessage(
+          `Simpan Semua berhasil: ${savedCount} SKU berubah telah disimpan.`
+        );
+      } else {
+        setMessage("Catatan Draft berhasil disimpan; tidak ada SKU berubah.");
+      }
+
+      try {
+        await refreshDrafts();
+      } catch (e) {
+        setError((current) =>
+          [
+            current,
+            `Daftar Draft gagal diperbarui: ${
+              e instanceof Error ? e.message : "kesalahan tidak diketahui"
+            }`,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+      }
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Gagal menyimpan Draft."
-      );
+      const reason =
+        e instanceof Error ? e.message : "Gagal menyimpan Draft.";
+      setSkuSaveStates((previous) => {
+        const updated = { ...previous };
+        for (const [variantId] of work) updated[variantId] = "failed";
+        return updated;
+      });
+      setDirty(true);
+      setError(reason);
       setMessage(
-        "Penyimpanan perlu diperiksa. Muat kembali Draft sebelum mengulangi."
+        `Penyimpanan gagal untuk ${work.length} SKU. Tidak ada status sukses yang diasumsikan.`
       );
     } finally {
+      savingLock.current = false;
       setSaving(false);
     }
   }
@@ -690,6 +963,14 @@ export default function ProductionReviewV42() {
 
       if (lineError) throw new Error(lineError.message);
 
+      const { data: requests, error: requestError } = await db
+        .from("wms_sim_approval_requests")
+        .select("id")
+        .eq("batch_id", id)
+        .limit(1);
+
+      if (requestError) throw new Error(requestError.message);
+
       const restored: Record<string, Edit> = {};
       const known = new Set(eligible.map((r) => r.variant_id));
       let unmatched = 0;
@@ -708,15 +989,22 @@ export default function ProductionReviewV42() {
       }
 
       setEdits(restored);
+      setSavedEdits(restored);
+      setSkuSaveStates({});
       setNotes(batch.notes ?? "");
+      setSavedNotes(batch.notes ?? "");
       setBatchId(id);
+      setHasSimulationRequest((requests ?? []).length > 0);
       setPage(0);
       setDirty(false);
       setPreflight(null);
       setReadiness(null);
 
       setMessage(
-        `Draft dibuka: ${Object.keys(restored).length} SKU.`
+        `Draft dibuka: ${Object.keys(restored).length} SKU` +
+        ((requests ?? []).length > 0
+          ? ". Pengajuan simulasi sudah ada; Draft hanya dapat dibaca."
+          : ".")
       );
 
       if (unmatched > 0) {
@@ -735,7 +1023,7 @@ export default function ProductionReviewV42() {
   const busy = loading || saving;
 
   return (
-    <main className="w-full min-w-0 max-w-full overflow-x-hidden px-4 py-6 md:px-8">
+    <main className="w-full min-w-0 max-w-full overflow-x-clip px-4 pt-6 pb-64 md:px-8 md:pb-44">
       <div className="mx-auto flex max-w-[1600px] min-w-0 flex-col gap-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -809,7 +1097,11 @@ export default function ProductionReviewV42() {
               onClick={() => {
                 setBatchId(null);
                 setEdits({});
+                setSavedEdits({});
+                setSkuSaveStates({});
                 setNotes("");
+                setSavedNotes("");
+                setHasSimulationRequest(false);
                 setDirty(false);
                 setPreflight(null);
                 setMessage("Draft baru siap diedit.");
@@ -846,24 +1138,55 @@ export default function ProductionReviewV42() {
           <textarea
             rows={2}
             value={notes}
-            disabled={busy}
+            disabled={busy || hasSimulationRequest}
             onChange={(e) => {
-              setNotes(e.target.value);
-              setDirty(true);
+              const nextNotes = e.target.value;
+              setNotes(nextNotes);
+              setDirty(
+                hasUnsavedEdits(edits, savedEdits) ||
+                nextNotes !== savedNotes
+              );
               setPreflight(null);
             }}
             placeholder="Catatan umum review produksi..."
             className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
 
-          <div className="mt-3 flex flex-wrap items-center gap-3">
+        </section>
+
+        {/* V42E_FLOATING_ACTIONS */}
+        <div className="fixed bottom-0 left-0 right-0 z-50 max-h-[40vh] overflow-y-auto border-t border-slate-300 bg-white px-4 py-3 shadow-2xl md:px-8">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-bold text-slate-900">
+                Review Produksi - Panel Aksi
+              </p>
+              <p className="text-xs text-slate-600">
+                {selected.length} SKU dipilih | {fmt(proposedQty)} pcs
+                {dirty ? " | Perubahan belum disimpan" : ""}
+              </p>
+            </div>
+            <span className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800">
+              MODE SIMULASI
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={saveDraft}
-              disabled={!complete || busy || selected.length === 0}
+              onClick={() => void saveAll()}
+              disabled={
+                !complete ||
+                busy ||
+                hasSimulationRequest ||
+                !canSaveAll
+              }
               className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"
             >
-              {saving ? "Menyimpan..." : "Simpan Draft Review"}
+              {saving
+                ? "Menyimpan..."
+                : `Simpan Semua${changedEdits.length > 0
+                  ? ` (${changedEdits.length} SKU)`
+                  : ""}`}
             </button>
 
             <button
@@ -893,6 +1216,214 @@ export default function ProductionReviewV42() {
             >
               Ajukan Approval — Belum Aktif
             </button>
+          </div>
+        </div>
+        <section className="min-w-0 rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
+            <div>
+              <h2 className="font-bold">Review Qty per SKU</h2>
+              <p className="text-xs text-slate-500">
+                {visible.length} SKU tersedia.
+                Produk bermasalah tidak dapat dipilih.
+              </p>
+            </div>
+            <input
+              type="search"
+              placeholder="Cari SKU, model, vendor..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+              }}
+              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full min-w-[1450px] text-left text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  {[
+                    "SKU / Produk",
+                    "Vendor",
+                    "Stok",
+                    "Incoming",
+                    "Target",
+                    "Kebutuhan",
+                    "Keputusan",
+                    "Qty Draft",
+                    "Catatan SKU",
+                    "Status Simpan",
+                    "Simpan SKU",
+                  ].map((name) => (
+                    <th key={name} className="border-b border-slate-200 px-3 py-3">
+                      {name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {shown.map((r) => {
+                  const edit = edits[r.variant_id];
+                  const skuStatus = !edit
+                    ? "Belum dipilih"
+                    : skuSaveStates[r.variant_id] === "saving"
+                      ? "Menyimpan"
+                      : sameEdit(edit, savedEdits[r.variant_id])
+                        ? "Tersimpan"
+                        : skuSaveStates[r.variant_id] === "failed"
+                          ? "Gagal"
+                          : "Belum disimpan";
+
+                  return (
+                    <tr key={r.variant_id}
+                        className="border-b border-slate-100 align-top">
+                      <td className="px-3 py-3">
+                        <p className="font-semibold">{r.sku_master}</p>
+                        <p className="text-xs text-slate-500">
+                          {r.product_name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {r.color} / {r.size}
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {r.vendor_name || "—"}
+                      </td>
+                      <td className="px-3 py-3">
+                        {fmt(r.v4_stock_normal_units)}
+                      </td>
+                      <td className="px-3 py-3">
+                        {fmt(r.v4_incoming_po_final_units)}
+                      </td>
+                      <td className="px-3 py-3">
+                        {fmt(r.target_stock_position_units)}
+                      </td>
+                      <td className="px-3 py-3 font-semibold">
+                        {fmt(r.v4_net_need_before_moq)}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <select
+                          value={edit?.decision ?? ""}
+                          disabled={busy || hasSimulationRequest}
+                          onChange={(e) =>
+                            changeDecision(r, e.target.value)
+                          }
+                          className="rounded-lg border border-slate-300 px-2 py-2"
+                        >
+                          <option
+                            value=""
+                            disabled={!!savedEdits[r.variant_id]}
+                          >
+                            Belum Dipilih
+                          </option>
+                          <option value="PROPOSE">Ajukan Produksi</option>
+                          <option value="HOLD">Tunda</option>
+                          <option value="EXCLUDE">Tidak Diproduksi</option>
+                        </select>
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100000}
+                          step={1}
+                          value={edit?.qty ?? 0}
+                          disabled={
+                            busy ||
+                            hasSimulationRequest ||
+                            edit?.decision !== "PROPOSE"
+                          }
+                          onChange={(e) =>
+                            updateEdit(r.variant_id, {
+                              qty: Number(e.target.value),
+                            })
+                          }
+                          className="w-28 rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100"
+                        />
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <input
+                          value={edit?.notes ?? ""}
+                          disabled={busy || hasSimulationRequest || !edit}
+                          onChange={(e) =>
+                            updateEdit(r.variant_id, {
+                              notes: e.target.value,
+                            })
+                          }
+                          placeholder="Alasan revisi..."
+                          className="w-48 rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100"
+                        />
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <span
+                          role="status"
+                          className={
+                            skuStatus === "Gagal"
+                              ? "font-semibold text-red-700"
+                              : skuStatus === "Tersimpan"
+                                ? "font-semibold text-emerald-700"
+                                : "text-slate-600"
+                          }
+                        >
+                          {skuStatus}
+                        </span>
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => void saveSku(r.variant_id)}
+                          disabled={
+                            !edit ||
+                            sameEdit(edit, savedEdits[r.variant_id]) ||
+                            busy ||
+                            hasSimulationRequest
+                          }
+                          className="whitespace-nowrap rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-40"
+                        >
+                          {skuSaveStates[r.variant_id] === "saving"
+                            ? "Menyimpan..."
+                            : "Simpan SKU"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <span className="text-sm text-slate-500">
+              Halaman {currentPage + 1} dari {pages}
+            </span>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={currentPage === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-40"
+              >
+                Sebelumnya
+              </button>
+
+              <button
+                type="button"
+                disabled={currentPage >= pages - 1}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-40"
+              >
+                Berikutnya
+              </button>
+            </div>
           </div>
         </section>
 
@@ -988,6 +1519,11 @@ export default function ProductionReviewV42() {
               </p>
             </section>
           )}
+        <SimulationApprovalPanel
+          batchId={batchId}
+          dirty={dirty}
+          busy={busy || checking || checkingReadiness}
+        />
         {preflight && (
           <section
             role="status"
@@ -1055,162 +1591,6 @@ export default function ProductionReviewV42() {
             </div>
           </section>
         )}
-
-        <section className="min-w-0 rounded-xl border border-slate-200 bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
-            <div>
-              <h2 className="font-bold">Review Qty per SKU</h2>
-              <p className="text-xs text-slate-500">
-                {visible.length} SKU tersedia.
-                Produk bermasalah tidak dapat dipilih.
-              </p>
-            </div>
-            <input
-              type="search"
-              placeholder="Cari SKU, model, vendor..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-              }}
-              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div className="max-w-full overflow-x-auto">
-            <table className="w-full min-w-[1450px] text-left text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  {[
-                    "SKU / Produk",
-                    "Vendor",
-                    "Stok",
-                    "Incoming",
-                    "Target",
-                    "Kebutuhan",
-                    "Keputusan",
-                    "Qty Draft",
-                    "Catatan SKU"
-                  ].map((name) => (
-                    <th key={name} className="border-b border-slate-200 px-3 py-3">
-                      {name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {shown.map((r) => {
-                  const edit = edits[r.variant_id];
-
-                  return (
-                    <tr key={r.variant_id}
-                        className="border-b border-slate-100 align-top">
-                      <td className="px-3 py-3">
-                        <p className="font-semibold">{r.sku_master}</p>
-                        <p className="text-xs text-slate-500">
-                          {r.product_name}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {r.color} / {r.size}
-                        </p>
-                      </td>
-
-                      <td className="px-3 py-3">
-                        {r.vendor_name || "—"}
-                      </td>
-                      <td className="px-3 py-3">
-                        {fmt(r.v4_stock_normal_units)}
-                      </td>
-                      <td className="px-3 py-3">
-                        {fmt(r.v4_incoming_po_final_units)}
-                      </td>
-                      <td className="px-3 py-3">
-                        {fmt(r.target_stock_position_units)}
-                      </td>
-                      <td className="px-3 py-3 font-semibold">
-                        {fmt(r.v4_net_need_before_moq)}
-                      </td>
-
-                      <td className="px-3 py-3">
-                        <select
-                          value={edit?.decision ?? ""}
-                          disabled={busy}
-                          onChange={(e) =>
-                            changeDecision(r, e.target.value)
-                          }
-                          className="rounded-lg border border-slate-300 px-2 py-2"
-                        >
-                          <option value="">Belum Dipilih</option>
-                          <option value="PROPOSE">Ajukan Produksi</option>
-                          <option value="HOLD">Tunda</option>
-                          <option value="EXCLUDE">Tidak Diproduksi</option>
-                        </select>
-                      </td>
-
-                      <td className="px-3 py-3">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100000}
-                          step={1}
-                          value={edit?.qty ?? 0}
-                          disabled={busy || edit?.decision !== "PROPOSE"}
-                          onChange={(e) =>
-                            updateEdit(r.variant_id, {
-                              qty: Number(e.target.value),
-                            })
-                          }
-                          className="w-28 rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100"
-                        />
-                      </td>
-
-                      <td className="px-3 py-3">
-                        <input
-                          value={edit?.notes ?? ""}
-                          disabled={busy || !edit}
-                          onChange={(e) =>
-                            updateEdit(r.variant_id, {
-                              notes: e.target.value,
-                            })
-                          }
-                          placeholder="Alasan revisi..."
-                          className="w-48 rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100"
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <span className="text-sm text-slate-500">
-              Halaman {currentPage + 1} dari {pages}
-            </span>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={currentPage === 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-40"
-              >
-                Sebelumnya
-              </button>
-
-              <button
-                type="button"
-                disabled={currentPage >= pages - 1}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-40"
-              >
-                Berikutnya
-              </button>
-            </div>
-          </div>
-        </section>
 
         <p className="text-xs text-slate-500">
           Simpan Draft menyimpan catatan dan usulan jumlah, bukan keputusan
