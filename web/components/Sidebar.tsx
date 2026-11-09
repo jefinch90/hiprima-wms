@@ -21,6 +21,7 @@ type NavigationLink = {
   visible: boolean;
   simulation?: boolean;
   exact?: boolean;
+  activePaths?: string[];
 };
 
 type NavigationGroup = {
@@ -179,6 +180,7 @@ export default function Sidebar() {
           href: "/production-planning/v4/review/",
           visible: true,
           simulation: true,
+          activePaths: ["/production-planning/v4/po-preview"],
         },
         {
           label: "Production Orders",
@@ -279,10 +281,12 @@ export default function Sidebar() {
                         className="ml-3 mt-1 min-w-0 space-y-1 border-l border-slate-200 pl-3"
                       >
                         {item.children.map((child) => {
-                          const childActive = activeMenu(
-                            child.href,
-                            child.exact
-                          );
+                          const childActive =
+                            activeMenu(child.href, child.exact) ||
+                            (child.activePaths?.some((path) =>
+                              activeMenu(path)
+                            ) ??
+                              false);
 
                           return (
                             <Link

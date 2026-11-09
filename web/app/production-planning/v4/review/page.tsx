@@ -45,6 +45,14 @@ type SavedLine = {
   review_notes: string | null;
 };
 
+type DraftPreviewSummary = {
+  id: string;
+  approvalStatus: string;
+  skuCount: number;
+  totalQty: number;
+  qtyComplete: boolean;
+};
+
 type SkuSaveState = "saving" | "failed";
 
 type ReadinessV1 = {
@@ -175,6 +183,9 @@ export default function ProductionReviewV42() {
   >({});
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [draftPreviewSummary, setDraftPreviewSummary] =
+    useState<DraftPreviewSummary | null>(null);
+  const [draftPreviewError, setDraftPreviewError] = useState("");
   const [notes, setNotes] = useState("");
   const [savedNotes, setSavedNotes] = useState("");
   const [hasSimulationRequest, setHasSimulationRequest] = useState(false);
@@ -939,6 +950,8 @@ export default function ProductionReviewV42() {
 
     setLoading(true);
     setError("");
+    setDraftPreviewSummary(null);
+    setDraftPreviewError("");
 
     try {
       const db = await requireUser();
@@ -953,29 +966,47 @@ export default function ProductionReviewV42() {
         throw new Error("Draft tidak tersedia untuk diedit.");
       }
 
-      const { data: lines, error: lineError } = await db
-        .from("wms_production_review_lines")
-        .select(
-          "variant_id,decision,proposed_qty,review_notes"
-        )
-        .eq("batch_id", id)
-        .range(0, 999);
+      const lines: SavedLine[] = [];
+      const pageSize = 1000;
+      let allLinesLoaded = false;
+      for (let offset = 0; offset < 100000; offset += pageSize) {
+        const { data, error: lineError } = await db
+          .from("wms_production_review_lines")
+          .select("variant_id,decision,proposed_qty,review_notes")
+          .eq("batch_id", id)
+          .range(offset, offset + pageSize - 1);
 
-      if (lineError) throw new Error(lineError.message);
+        if (lineError) throw new Error(lineError.message);
+
+        const pageLines = (data ?? []) as SavedLine[];
+        lines.push(...pageLines);
+        if (pageLines.length < pageSize) {
+          allLinesLoaded = true;
+          break;
+        }
+      }
+
+      if (!allLinesLoaded || lines.length === 0) {
+        throw new Error(
+          "Baris Draft tidak dapat dimuat lengkap. Ringkasan Preview tidak tersedia."
+        );
+      }
 
       const { data: requests, error: requestError } = await db
         .from("wms_sim_approval_requests")
-        .select("id")
+        .select("id,status,requested_at")
         .eq("batch_id", id)
+        .order("requested_at", { ascending: false })
         .limit(1);
 
       if (requestError) throw new Error(requestError.message);
+      const latestRequest = requests?.[0];
 
       const restored: Record<string, Edit> = {};
       const known = new Set(eligible.map((r) => r.variant_id));
       let unmatched = 0;
 
-      for (const line of (lines ?? []) as SavedLine[]) {
+      for (const line of lines) {
         if (!known.has(line.variant_id)) {
           unmatched++;
           continue;
@@ -994,7 +1025,25 @@ export default function ProductionReviewV42() {
       setNotes(batch.notes ?? "");
       setSavedNotes(batch.notes ?? "");
       setBatchId(id);
-      setHasSimulationRequest((requests ?? []).length > 0);
+      setHasSimulationRequest(!!latestRequest);
+      const proposedLines = lines.filter(
+        (line) => line.decision === "PROPOSE"
+      );
+      const invalidQty = proposedLines.some(
+        (line) =>
+          !Number.isSafeInteger(Number(line.proposed_qty)) ||
+          Number(line.proposed_qty) <= 0
+      );
+      setDraftPreviewSummary({
+        id,
+        approvalStatus: latestRequest?.status ?? "Belum diajukan",
+        skuCount: lines.length,
+        totalQty: proposedLines.reduce(
+          (total, line) => total + number(line.proposed_qty),
+          0
+        ),
+        qtyComplete: !invalidQty,
+      });
       setPage(0);
       setDirty(false);
       setPreflight(null);
@@ -1002,7 +1051,7 @@ export default function ProductionReviewV42() {
 
       setMessage(
         `Draft dibuka: ${Object.keys(restored).length} SKU` +
-        ((requests ?? []).length > 0
+        (latestRequest
           ? ". Pengajuan simulasi sudah ada; Draft hanya dapat dibaca."
           : ".")
       );
@@ -1014,7 +1063,10 @@ export default function ProductionReviewV42() {
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Gagal membuka Draft.");
+      const reason = e instanceof Error ? e.message : "Gagal membuka Draft.";
+      setError(reason);
+      setDraftPreviewError(reason);
+      setDraftPreviewSummary(null);
     } finally {
       setLoading(false);
     }
@@ -1096,6 +1148,8 @@ export default function ProductionReviewV42() {
               disabled={busy || !complete}
               onClick={() => {
                 setBatchId(null);
+                setDraftPreviewSummary(null);
+                setDraftPreviewError("");
                 setEdits({});
                 setSavedEdits({});
                 setSkuSaveStates({});
@@ -1127,6 +1181,64 @@ export default function ProductionReviewV42() {
                 </option>
               ))}
             </select>
+
+            {draftPreviewError && (
+              <p
+                role="alert"
+                className="basis-full break-words rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800"
+              >
+                Preview Draft tidak tersedia: {draftPreviewError}
+              </p>
+            )}
+
+            {draftPreviewSummary && (
+              <div className="basis-full rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                <div className="grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-600">ID Draft</p>
+                    <p className="break-all font-semibold">
+                      {draftPreviewSummary.id.slice(0, 8)}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-600">
+                      Status Approval Simulasi
+                    </p>
+                    <p className="break-words font-semibold">
+                      {draftPreviewSummary.approvalStatus === "REJECTED"
+                        ? "DITOLAK (Simulasi)"
+                        : draftPreviewSummary.approvalStatus === "APPROVED"
+                          ? "Disetujui (Simulasi) — bukan operasional"
+                          : draftPreviewSummary.approvalStatus === "SUBMITTED"
+                            ? "Menunggu persetujuan (Simulasi)"
+                            : draftPreviewSummary.approvalStatus}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-600">
+                      Jumlah SKU dan Total Qty Usulan
+                    </p>
+                    <p className="font-semibold">
+                      {draftPreviewSummary.skuCount} SKU ·{" "}
+                      {draftPreviewSummary.qtyComplete
+                        ? `${fmt(draftPreviewSummary.totalQty)} pcs`
+                        : "Qty tidak lengkap"}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <Link
+                    href={`/production-planning/v4/po-preview/?batch=${encodeURIComponent(draftPreviewSummary.id)}`}
+                    className="inline-flex rounded-lg bg-indigo-700 px-4 py-2 font-semibold text-white hover:bg-indigo-800"
+                  >
+                    Lihat Preview PO Draft
+                  </Link>
+                  <span className="text-xs text-slate-600">
+                    Preview read-only dari baris Draft tersimpan.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {batchId && (
               <span className="text-xs text-slate-500">
