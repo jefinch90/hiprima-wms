@@ -36,12 +36,17 @@ export default function ProductionOrdersPage() {
   const [etaDraft,setEtaDraft]=useState<Record<string,string>>({});
   const [groupKey,setGroupKey]=useState("");
   const [sku,setSku]=useState("");
+  const [skuSearchMessage,setSkuSearchMessage]=useState("");
   const [qty,setQty]=useState("");
   const [variantMatches,setVariantMatches]=useState<Variant[]>([]);
   const [variantId,setVariantId]=useState("");
   const [mapLineId,setMapLineId]=useState("");
   const [candidates,setCandidates]=useState<Record<string,Candidate[]>>({});
   const [receiptChoice,setReceiptChoice]=useState<Record<string,string>>({});
+  const [bulkSelection,setBulkSelection]=useState<Record<string,boolean>>({});
+  const [bulkVendorIds,setBulkVendorIds]=useState<Record<string,string>>({});
+  const [bulkNumbers,setBulkNumbers]=useState<Record<string,string>>({});
+  const [bulkConfirmed,setBulkConfirmed]=useState(false);
 
   const reload = useCallback(async () => {
     const [o,l,e,v] = await Promise.all([
@@ -86,10 +91,23 @@ export default function ProductionOrdersPage() {
   }
   async function lookupSku(){
     setError("");setVariantMatches([]);setVariantId("");
-    const clean=sku.trim();if(!clean) return;
+    const clean=sku.trim();
+    if(!clean) {
+      setSkuSearchMessage("Masukkan SKU untuk mulai mencari.");
+      return;
+    }
+    setSkuSearchMessage("");
+    const escaped=clean.replace(/[\\%_]/g,"\\$&");
     const {data,error:e}=await supabase.from("product_variants")
-      .select("id,sku,color,size").ilike("sku",`%${clean.replaceAll("%","")}%`).eq("is_active",true).limit(25);
-    if(e) setError(e.message); else setVariantMatches((data||[]) as Variant[]);
+      .select("id,sku,color,size").ilike("sku",`%${escaped}%`).eq("is_active",true).limit(25);
+    if(e) {
+      setError(e.message);
+      setSkuSearchMessage("Pencarian SKU gagal.");
+    } else {
+      const results=(data||[]) as Variant[];
+      setVariantMatches(results);
+      setSkuSearchMessage(results.length ? `${results.length} SKU ditemukan.` : "SKU aktif tidak ditemukan.");
+    }
   }
   const selectedOrder=orders.find(o=>o.id===selected);
   const selectedLines=lines.filter(l=>l.po_id===selected);
@@ -103,6 +121,8 @@ export default function ProductionOrdersPage() {
     }
     return Array.from(map.values()).sort((a,b)=>a.date.localeCompare(b.date));
   },[initial]);
+  const bulkGroups=groups.filter(g=>Boolean(bulkSelection[g.key])&&g.imported===0);
+  const bulkLines=bulkGroups.reduce((sum,g)=>sum+g.rows,0);
   const activeQty=lines.reduce((a,x)=>a+x.confirmed_incoming_qty,0);
   const sumOrdered=lines.reduce((a,x)=>a+(x.po_status==="FINAL"?x.ordered_qty:0),0);
   const receivedQty=lines.reduce((a,x)=>a+(x.po_status==="FINAL"?x.received_qty:0),0);
@@ -129,19 +149,48 @@ export default function ProductionOrdersPage() {
           {tab==="initial" ? <section className="space-y-3 rounded-xl border bg-white p-4">
             <h2 className="text-lg font-bold">Review PO dari Excel</h2><p className="text-sm text-slate-600">Satu kelompok vendor + tanggal belum tentu satu PO resmi. Periksa nomor PO dan pemetaan vendor sebelum mengubahnya menjadi Draft. Tidak ada incoming aktif sampai PO difinalisasi.</p>
             <div className="overflow-x-auto"><table className="min-w-[820px] w-full text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">Tanggal</th><th className="p-2">Vendor Sumber</th><th className="p-2">Baris</th><th className="p-2">Qty</th><th className="p-2">Ready</th><th className="p-2">Sudah Dipindah</th><th className="p-2">Tindakan</th></tr></thead><tbody>{groups.map(g=><tr key={g.key} className="border-b"><td className="p-2">{g.date}</td><td className="p-2">{g.vendor}</td><td className="p-2">{g.rows}</td><td className="p-2">{money(g.qty)}</td><td className="p-2">{money(g.ready)}</td><td className="p-2">{g.imported}/{g.rows}</td><td className="p-2"><button disabled={busy||g.imported===g.rows} className={soft} onClick={()=>{setGroupKey(g.key);setPoDate(g.date);setPoNumber("");setVendorId("");}}>Pilih Grup</button></td></tr>)}</tbody></table></div>
+            <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-bold">Konversi Beberapa Grup Sekaligus â€” Hanya Draft</h3>
+              <p className="text-xs text-amber-800">Penting: satu grup vendor + tanggal belum tentu satu PO sebenarnya. Hanya centang grup yang sudah dipastikan satu pesanan, belum diimpor, dan vendor master-nya benar. Barang Ready at Vendor historis harus dicek apakah sudah pernah diterima sebelum PO difinalisasi.</p>
+              <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead><tr className="border-b"><th className="p-2">Pilih</th><th className="p-2">Tanggal / vendor sumber</th><th className="p-2">Qty / baris</th><th className="p-2">Vendor Master (wajib)</th><th className="p-2">Nomor PO historis</th></tr></thead><tbody>
+                {groups.filter(g=>g.imported<g.rows).map(g=><tr key={g.key} className="border-b align-top">
+                  <td className="p-2"><input type="checkbox" aria-label={`Pilih grup ${g.vendor} ${g.date}`} disabled={busy||g.imported>0} checked={Boolean(bulkSelection[g.key])} onChange={e=>setBulkSelection(s=>({...s,[g.key]:e.target.checked}))}/></td>
+                  <td className="p-2">{g.date}<br/><b>{g.vendor}</b>{g.imported>0&&<p className="text-xs text-red-700">Sudah sebagian dipindah: tidak bisa diproses massal</p>}</td>
+                  <td className="p-2">{money(g.qty)} pcs / {g.rows} baris</td>
+                  <td className="p-2"><select className={inp} disabled={busy||g.imported>0} value={bulkVendorIds[g.key]||""} onChange={e=>setBulkVendorIds(v=>({...v,[g.key]:e.target.value}))}><option value="">Pilih vendor terverifikasi</option>{vendors.map(v=><option key={v.id} value={v.id}>{v.vendor_name}</option>)}</select></td>
+                  <td className="p-2"><input className={inp} disabled={busy||g.imported>0} aria-label={`Nomor historis ${g.vendor} ${g.date}`} value={bulkNumbers[g.key]??g.date.replaceAll("-","")} onChange={e=>setBulkNumbers(n=>({...n,[g.key]:e.target.value}))}/></td>
+                </tr>)}
+              </tbody></table></div>
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={busy} checked={bulkConfirmed} onChange={e=>setBulkConfirmed(e.target.checked)}/><span>Saya sudah memastikan setiap grup terpilih merupakan satu PO yang benar dan memverifikasi vendor serta nomor PO historisnya. Data hanya akan dikonversi menjadi Draft, bukan Final.</span></label>
+              <div className="flex flex-wrap items-center gap-3"><button className={btn} disabled={busy||!bulkConfirmed||bulkGroups.length===0||bulkGroups.some(g=>!bulkVendorIds[g.key]||!(bulkNumbers[g.key]??g.date.replaceAll("-","")).trim())} onClick={()=>{
+                const summary=`Konversi ${bulkGroups.length} grup (${bulkLines} baris) menjadi PO Draft? Tidak ada PO Final atau perubahan stok.`;
+                if(!window.confirm(summary))return;
+                void run(`Konversi ${bulkGroups.length} grup`,async()=>{
+                  await call("wms_po_import_bulk",{p_groups:bulkGroups.map(g=>({vendor_raw:g.vendor,source_date:g.date,vendor_id:bulkVendorIds[g.key],po_number:(bulkNumbers[g.key]??g.date.replaceAll("-","")).trim(),confirmed:true}))});
+                  setBulkSelection({});setBulkVendorIds({});setBulkNumbers({});setBulkConfirmed(false);setTab("po");
+                });
+              }}>Konversi {bulkGroups.length} Grup ke Draft</button><span className="text-xs text-slate-600">Dipilih: {bulkLines} baris. Jika satu grup gagal, semua grup dalam batch dibatalkan oleh database.</span></div>
+            </div>
             {groupKey && <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4"><b>Konversi kelompok {groupKey} menjadi PO Draft</b><p className="text-xs text-slate-600">Bukan approval final. Pilih vendor yang benar, isi nomor PO resmi. Bila satu tanggal/vendor ternyata lebih dari satu PO, jangan konversi kelompok ini dulu.</p>
               <div className="grid gap-3 md:grid-cols-3"><input className={inp} placeholder="Nomor PO resmi" value={poNumber} onChange={e=>setPoNumber(e.target.value)} /><select className={inp} value={vendorId} onChange={e=>setVendorId(e.target.value)}><option value="">Pilih Vendor Terverifikasi</option>{vendors.map(v=><option key={v.id} value={v.id}>{v.vendor_name}</option>)}</select><button className={btn} disabled={!vendorId||!poNumber.trim()||busy} onClick={()=>void run("Konversi ke Draft",async()=>{const g=groups.find(g=>g.key===groupKey);if(!g)throw Error("Grup tidak ditemukan");const out=await call("wms_po_import_group",{p_vendor_raw:g.vendor,p_source_date:g.date,p_vendor_id:vendorId,p_po_number:poNumber.trim()}) as {po_id:string;lines:number;unmapped:number};setSelected(out.po_id);setTab("po");setGroupKey("");setMessage(`${out.lines} baris, ${out.unmapped} belum mapping.`);})}>Buat PO Draft</button></div>
             </div>}
           </section> : <>
             <section className="space-y-3 rounded-xl border bg-white p-4">
               <h2 className="text-lg font-bold">Buat PO Baru (Draft)</h2>
-              <div className="grid gap-3 md:grid-cols-5"><input className={inp} placeholder="Nomor PO resmi" value={poNumber} onChange={e=>setPoNumber(e.target.value)}/><select className={inp} value={vendorId} onChange={e=>setVendorId(e.target.value)}><option value="">Pilih vendor</option>{vendors.map(v=><option key={v.id} value={v.id}>{v.vendor_name}</option>)}</select><input className={inp} type="date" value={poDate} onChange={e=>setPoDate(e.target.value)}/><input className={inp} type="date" value={poEta} onChange={e=>setPoEta(e.target.value)}/><button className={btn} disabled={busy||!poNumber.trim()||!vendorId||!poDate} onClick={()=>void run("Buat PO Draft",async()=>{const id=await call("wms_po_create",{p_po_number:poNumber.trim(),p_vendor_id:vendorId,p_order_date:poDate,p_eta_date:poEta||null});setSelected(String(id));setPoNumber("");})}>Buat Draft</button></div>
+              <div className="grid gap-3 md:grid-cols-5">
+                <div className="flex min-h-[42px] items-center rounded-lg border border-slate-300 bg-slate-100 px-3 text-sm font-medium text-slate-700" title="Nomor asli dialokasikan secara atomik oleh Supabase saat Draft dibuat">Nomor PO otomatis</div>
+                <select className={inp} value={vendorId} onChange={e=>setVendorId(e.target.value)}><option value="">Pilih vendor</option>{vendors.map(v=><option key={v.id} value={v.id}>{v.vendor_name}</option>)}</select>
+                <input className={inp} aria-label="Tanggal PO" type="date" value={poDate} onChange={e=>setPoDate(e.target.value)}/>
+                <input className={inp} aria-label="Estimasi tiba PO" type="date" value={poEta} onChange={e=>setPoEta(e.target.value)}/>
+                <button className={btn} disabled={busy||!vendorId||!poDate} onClick={()=>void run("Buat PO Draft otomatis",async()=>{const id=await call("wms_po_create_auto",{p_vendor_id:vendorId,p_order_date:poDate,p_eta_date:poEta||null,p_notes:null});setSelected(String(id));})}>Buat Draft</button>
+              </div>
+              <p className="text-xs text-slate-500">Nomor akan dibuat setelah klik Buat Draft, contoh PO-20261101-001. Nomor unik per tanggal, tidak dipakai ulang. PO historis tetap memakai nomor lama.</p>
             </section>
             <section className="space-y-3 rounded-xl border bg-white p-4"><h2 className="text-lg font-bold">Daftar PO</h2><p className="text-xs text-slate-500">Qty Final dipesan: {money(sumOrdered)} pcs. Pilih PO untuk melihat item, progres, dan penerimaan.</p>
               <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">Nomor PO</th><th className="p-2">Tanggal</th><th className="p-2">Vendor</th><th className="p-2">Status</th><th className="p-2">Belum Datang</th></tr></thead><tbody>{orders.map(o=><tr key={o.id} className={`cursor-pointer border-b ${selected===o.id?"bg-blue-50":"hover:bg-slate-50"}`} onClick={()=>setSelected(o.id)}><td className="p-2 font-semibold">{o.po_number}</td><td className="p-2">{o.order_date}</td><td className="p-2">{vendors.find(v=>v.id===o.vendor_id)?.vendor_name||"—"}</td><td className="p-2">{o.status}</td><td className="p-2">{money(lines.filter(l=>l.po_id===o.id).reduce((a,x)=>a+x.remaining_qty,0))} pcs</td></tr>)}</tbody></table></div>
             </section>
             {selectedOrder && <section className="space-y-3 rounded-xl border bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></div>
-              {selectedOrder.status==="DRAFT"&&<div className="space-y-2 rounded-lg bg-slate-50 p-3"><b className="text-sm">Tambah SKU ke PO</b><div className="grid gap-2 md:grid-cols-5"><input className={inp} value={sku} onChange={e=>setSku(e.target.value)} placeholder="Cari SKU master"/><button className={soft} onClick={()=>void lookupSku()}>Cari SKU</button><select className={inp} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih hasil</option>{variantMatches.map(v=><option value={v.id} key={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><input className={inp} type="number" min="1" placeholder="Qty PO" value={qty} onChange={e=>setQty(e.target.value)}/><button className={btn} disabled={busy||!variantId||!(Number(qty)>0)} onClick={()=>void run("Tambah SKU",async()=>{await call("wms_po_add_line",{p_po_id:selected,p_variant_id:variantId,p_qty:Number(qty)});setQty("");setSku("");setVariantId("");setVariantMatches([]);})}>Tambah</button></div></div>}
+              {selectedOrder.status==="DRAFT"&&<div className="space-y-2 rounded-lg bg-slate-50 p-3"><b className="text-sm">Tambah SKU ke PO</b><div className="grid min-w-0 gap-2 md:grid-cols-5"><input className={inp} value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}} placeholder="Cari SKU master"/><button className={soft} onClick={()=>void lookupSku()}>Cari SKU</button><select className={inp} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih hasil</option>{variantMatches.map(v=><option value={v.id} key={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><input className={inp} type="number" min="1" placeholder="Qty PO" value={qty} onChange={e=>setQty(e.target.value)}/><button className={btn} disabled={busy||!variantId||!(Number(qty)>0)} onClick={()=>void run("Tambah SKU",async()=>{await call("wms_po_add_line",{p_po_id:selected,p_variant_id:variantId,p_qty:Number(qty)});setQty("");setSku("");setVariantId("");setVariantMatches([]);setSkuSearchMessage("");})}>Tambah</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
               <div className="overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">SKU / Produk</th><th className="p-2">Qty PO</th><th className="p-2">Diterima</th><th className="p-2">Belum Datang</th><th className="p-2">Progres Vendor</th><th className="p-2">Status</th><th className="p-2">Tindakan</th></tr></thead><tbody>{selectedLines.map(l=><tr key={l.id} className="border-b align-top"><td className="p-2"><b>{l.source_sku}</b><p className="text-xs text-slate-500">{l.source_product_name}</p>{l.verified_vendor_lifecycle&&<p className="text-xs font-semibold text-slate-600">Lifecycle Produk: {lifecycleLabel(l.verified_vendor_lifecycle)}</p>}{!l.variant_id&&<span className="text-xs font-bold text-red-700">Belum mapping Master</span>}</td><td className="p-2">{l.ordered_qty}</td><td className="p-2">{l.received_qty}</td><td className="p-2 font-bold">{l.remaining_qty}</td><td className="p-2">{display(l.progress)}</td><td className="p-2">{display(l.tracking_status)}</td><td className="space-y-1 p-2">
                 <select className={soft} disabled={busy||!['DRAFT','FINAL'].includes(l.po_status)} value={l.progress} onChange={e=>void run("Update progres",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:e.target.value,p_eta_date:null});})}><option value="UNCONFIRMED">Belum Dikonfirmasi</option><option value="IN_PRODUCTION">Dalam Produksi</option><option value="READY_AT_VENDOR">Ready at Vendor</option><option value="IN_TRANSIT">Dalam Pengiriman</option></select>
                 {l.po_status==="DRAFT" && <button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Qty PO untuk "+l.source_sku+" (angka positif):",String(l.ordered_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>0)void run("Update Qty PO",async()=>{await call("wms_po_set_draft_qty",{p_line_id:l.id,p_qty:Number(value)});});}}>Ubah Qty PO</button>}
@@ -158,7 +207,7 @@ export default function ProductionOrdersPage() {
                 {l.po_status==="FINAL"&&l.variant_id&&<button className={soft} disabled={busy} onClick={()=>void run("Cari Inbound",async()=>{const a=await call("wms_po_inbound_candidates",{p_line_id:l.id});setCandidates(x=>({...x,[l.id]:(a||[]) as Candidate[]}));})}>Cari Inbound</button>}
                 {candidates[l.id] && <div className="flex gap-2"><select className={soft} value={receiptChoice[l.id]||""} onChange={e=>setReceiptChoice(x=>({...x,[l.id]:e.target.value}))}><option value="">Pilih inbound diposting</option>{candidates[l.id].map(c=><option key={c.movement_id} value={c.movement_id}>#{c.movement_no} · {c.quantity} pcs</option>)}</select><button className={btn} disabled={busy||!receiptChoice[l.id]} onClick={()=>void run("Tautkan inbound",async()=>{await call("wms_po_link_inbound",{p_line_id:l.id,p_movement_id:receiptChoice[l.id]});setCandidates(x=>{const next={...x};delete next[l.id];return next;});})}>Tautkan</button></div>}
               </td></tr>)}</tbody></table></div>
-              {mapLineId && selectedLines.some(l=>l.id===mapLineId) && <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3"><b>Mapping SKU ke Master</b><div className="flex flex-wrap gap-2"><input className="min-w-[180px] flex-1 rounded-lg border p-2" value={sku} onChange={e=>setSku(e.target.value)}/><button className={soft} onClick={()=>void lookupSku()}>Cari Master SKU</button><select className={soft} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih SKU valid</option>{variantMatches.map(v=><option key={v.id} value={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><button className={btn} disabled={!variantId||busy} onClick={()=>void run("Simpan mapping",async()=>{await call("wms_po_map_line",{p_line_id:mapLineId,p_variant_id:variantId});setMapLineId("");setVariantId("");setSku("");setVariantMatches([]);})}>Simpan</button><button className={soft} onClick={()=>setMapLineId("")}>Batal</button></div></div>}
+              {mapLineId && selectedLines.some(l=>l.id===mapLineId) && <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3"><b>Mapping SKU ke Master</b><div className="flex min-w-0 flex-wrap gap-2"><input className="min-w-[180px] max-w-full flex-1 rounded-lg border p-2" value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}}/><button className={soft} onClick={()=>void lookupSku()}>Cari Master SKU</button><select className={soft} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih SKU valid</option>{variantMatches.map(v=><option key={v.id} value={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><button className={btn} disabled={!variantId||busy} onClick={()=>void run("Simpan mapping",async()=>{await call("wms_po_map_line",{p_line_id:mapLineId,p_variant_id:variantId});setMapLineId("");setVariantId("");setSku("");setVariantMatches([]);setSkuSearchMessage("");})}>Simpan</button><button className={soft} onClick={()=>setMapLineId("")}>Batal</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
               <p className="text-xs text-slate-500">Saat barang tiba: posting di Inbound WMS dengan <b>Referensi = {selectedOrder.po_number}</b> dan SKU yang sesuai; setelah itu klik Cari Inbound → Tautkan. Stok hanya bertambah sekali, dari transaksi Inbound.</p>
             </section>}
           </>}

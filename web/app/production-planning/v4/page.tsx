@@ -44,6 +44,8 @@ export default function SmartPlanningV4Page() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(25);
   const [leadTime, setLeadTime] = useState(30);
   const [reviewDays, setReviewDays] = useState(7);
 
@@ -75,6 +77,7 @@ export default function SmartPlanningV4Page() {
     setBusy(true);
     setComplete(false);
     setRows([]);
+    setTablePage(1);
     setError("");
     setProgress("Memulai pembacaan data V4...");
 
@@ -95,7 +98,7 @@ export default function SmartPlanningV4Page() {
       const pageSize = 100;
       let finished = false;
 
-      for (let page = 0; page < 20; page++) {
+      for (let page = 0; page < 100; page++) {
         const offset = page * pageSize;
 
         const { data, error: rpcError } = await client.rpc(
@@ -167,14 +170,15 @@ export default function SmartPlanningV4Page() {
   }
 
   const summary = useMemo(() => {
+    const ready = rows.filter(
+      (row) =>
+        row.v4_status === "SIMULATION_ONLY" &&
+        row.production_policy === "ACTIVE_SIMULATION_ONLY"
+    ).length;
     return {
       total: rows.length,
-      calculated: rows.filter(
-        (r) => r.v4_status === "SIMULATION_ONLY"
-      ).length,
-      review: rows.filter(
-        (r) => r.v4_status !== "SIMULATION_ONLY"
-      ).length,
+      ready,
+      deferred: rows.length - ready,
       incoming: rows.reduce(
         (sum, r) => sum + numberValue(r.v4_incoming_po_final_units),
         0
@@ -199,16 +203,37 @@ export default function SmartPlanningV4Page() {
         [r.sku_master, r.product_name, r.vendor_name]
           .some((v) => String(v || "").toLowerCase().includes(q));
 
+      const ready =
+        r.v4_status === "SIMULATION_ONLY" &&
+        r.production_policy === "ACTIVE_SIMULATION_ONLY";
       const matchFilter =
         filter === "ALL" ||
-        (filter === "READY" && r.v4_status === "SIMULATION_ONLY") ||
-        (filter === "REVIEW" && r.v4_status !== "SIMULATION_ONLY") ||
+        (filter === "READY" && ready) ||
+        (filter === "REVIEW" && !ready) ||
+        (filter === "NEED" && numberValue(r.v4_net_need_before_moq) > 0) ||
         (filter === "INCOMING" &&
           numberValue(r.v4_incoming_po_final_units) > 0);
 
       return matchText && matchFilter;
+    }).sort((left, right) => {
+      const leftReady =
+        left.v4_status === "SIMULATION_ONLY" &&
+        left.production_policy === "ACTIVE_SIMULATION_ONLY";
+      const rightReady =
+        right.v4_status === "SIMULATION_ONLY" &&
+        right.production_policy === "ACTIVE_SIMULATION_ONLY";
+      if (leftReady !== rightReady) return leftReady ? -1 : 1;
+      const needDifference =
+        numberValue(right.v4_net_need_before_moq) -
+        numberValue(left.v4_net_need_before_moq);
+      return needDifference || String(left.sku_master ?? "").localeCompare(String(right.sku_master ?? ""));
     });
   }, [rows, search, filter]);
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / tablePageSize));
+  const activePage = Math.min(tablePage, totalPages);
+  const startIndex = (activePage - 1) * tablePageSize;
+  const pageRows = visible.slice(startIndex, startIndex + tablePageSize);
 
   return (
     <main className="min-w-0 w-full max-w-full overflow-x-hidden px-4 py-6 md:px-8">
@@ -226,18 +251,18 @@ export default function SmartPlanningV4Page() {
             </p>
           </div>
           <Link
-            href="/production-planning/"
+            href="/production-planning/v4/operations/"
             className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-800"
           >
-            Kembali ke Planning V2
+            Ke Review &amp; Persetujuan
           </Link>
         </div>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <strong>MODE SIMULASI — BUKAN PO.</strong>{" "}
-          Data penjualan mengikuti snapshot Production Planning V2.
-          SKU bermasalah harus direview. MOQ per model/vendor belum diterapkan
-          pada angka kebutuhan bersih. Tidak ada perubahan stok maupun PO.
+          <strong>MODE SIMULASI — BUKAN PERSETUJUAN OPERASIONAL ATAU PO.</strong>{" "}
+          Perhitungan stok dan kebutuhan ini hanya untuk referensi. Keputusan operasional
+          dilakukan terpisah pada Review &amp; Persetujuan; simulasi tidak mengubah stok
+          maupun PO.
         </div>
 
         <div className="flex min-w-0 flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">
@@ -289,8 +314,8 @@ export default function SmartPlanningV4Page() {
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
           {[
             ["SKU Dibaca", summary.total],
-            ["Simulasi Valid", summary.calculated],
-            ["Perlu Review", summary.review],
+            ["Siap untuk Draft", summary.ready],
+            ["Ditunda / Perlu Pemeriksaan", summary.deferred],
             ["Incoming pada SKU Dibaca", `${format(summary.incoming)} pcs`],
             ["Kebutuhan Bersih (Pra-MOQ)", `${format(summary.netNeed)} pcs`],
           ].map(([label, value]) => (
@@ -310,7 +335,7 @@ export default function SmartPlanningV4Page() {
                 Detail Kebutuhan Produksi
               </h2>
               <p className="text-xs text-slate-500">
-                {visible.length} SKU tampil.{" "}
+                {format(visible.length)} SKU tersedia.{" "}
                 {complete
                   ? "Seluruh halaman preview telah dibaca."
                   : "Data belum lengkap."}
@@ -320,24 +345,28 @@ export default function SmartPlanningV4Page() {
               <input
                 type="search"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setTablePage(1); }}
                 placeholder="Cari SKU, produk, vendor"
                 className="min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
               <select
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={(e) => { setFilter(e.target.value); setTablePage(1); }}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="ALL">Semua Status</option>
-                <option value="READY">Simulasi Valid</option>
-                <option value="REVIEW">Perlu Review</option>
+                <option value="READY">Siap untuk Draft</option>
+                <option value="NEED">Perlu Produksi</option>
+                <option value="REVIEW">Ditunda / Perlu Pemeriksaan</option>
                 <option value="INCOMING">Ada Incoming</option>
               </select>
             </div>
           </div>
 
-          <div className="max-w-full overflow-x-auto">
+          <div
+            key={`${activePage}-${tablePageSize}-${search}-${filter}`}
+            className="max-h-[60vh] max-w-full overflow-auto"
+          >
             <table className="w-full min-w-[1320px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
@@ -346,14 +375,14 @@ export default function SmartPlanningV4Page() {
                     "Incoming Final", "Posisi Stok", "Target",
                     "Kebutuhan Bersih", "MOQ Vendor", "Status"
                   ].map((label) => (
-                    <th key={label} className="whitespace-nowrap border-b border-slate-200 px-3 py-3">
+                    <th key={label} className="sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-3 py-3">
                       {label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {visible.map((r, index) => (
+                {pageRows.map((r, index) => (
                   <tr key={`${r.variant_id || r.sku_master}-${index}`} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-3">
                       <p className="font-semibold text-slate-900">
@@ -385,12 +414,14 @@ export default function SmartPlanningV4Page() {
                     </td>
                     <td className="px-3 py-3">
                       <span className={
-                        r.v4_status === "SIMULATION_ONLY"
+                        r.v4_status === "SIMULATION_ONLY" &&
+                        r.production_policy === "ACTIVE_SIMULATION_ONLY"
                           ? "font-medium text-emerald-700"
                           : "font-medium text-amber-700"
                       }>
-                        {r.v4_status === "SIMULATION_ONLY"
-                          ? "Simulasi Valid"
+                        {r.v4_status === "SIMULATION_ONLY" &&
+                        r.production_policy === "ACTIVE_SIMULATION_ONLY"
+                          ? "Siap untuk Draft"
                           : r.v4_status || "Perlu Review"}
                       </span>
                       <p className="mt-1 text-xs text-slate-500">
@@ -410,6 +441,62 @@ export default function SmartPlanningV4Page() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div id="planning-pagination" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-4 text-sm">
+            <p className="text-slate-600">
+              Menampilkan {visible.length ? startIndex + 1 : 0}
+              {" - "}
+              {Math.min(startIndex + tablePageSize, visible.length)}
+              {" dari "}{format(visible.length)} SKU
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Jumlah SKU per halaman"
+                value={tablePageSize}
+                onChange={(e) => {
+                  setTablePageSize(Number(e.target.value));
+                  setTablePage(1);
+                }}
+                className="rounded-lg border border-slate-300 px-3 py-2"
+              >
+                <option value={25}>25 / halaman</option>
+                <option value={50}>50 / halaman</option>
+                <option value={100}>100 / halaman</option>
+              </select>
+
+              <button
+                type="button"
+                disabled={activePage <= 1}
+                onClick={() => setTablePage(activePage - 1)}
+                className="rounded-lg border border-slate-300 px-3 py-2 disabled:opacity-40"
+              >
+                Sebelumnya
+              </button>
+
+              <select
+                aria-label="Pilih halaman"
+                value={activePage}
+                onChange={(e) => setTablePage(Number(e.target.value))}
+                className="rounded-lg border border-slate-300 px-3 py-2"
+              >
+                {Array.from({ length: totalPages }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    Halaman {i + 1} / {totalPages}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                disabled={activePage >= totalPages}
+                onClick={() => setTablePage(activePage + 1)}
+                className="rounded-lg bg-slate-900 px-3 py-2 font-medium text-white disabled:opacity-40"
+              >
+                Berikutnya
+              </button>
+            </div>
           </div>
         </div>
 

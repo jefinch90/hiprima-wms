@@ -42,12 +42,130 @@ type ImportBatch = {
   period_end: string | null;
 };
 
+type HeaderValidation = {
+  headerIndex: number | null;
+  headers: string[];
+  found: string[];
+  missing: string[];
+  duplicates: string[];
+  unrecognized: string[];
+  ambiguous: boolean;
+  isValid: boolean;
+};
+
+const REQUIRED_ISELLER_HEADERS = [
+  "judul produk",
+  "hari",
+  "tipe produk",
+  "nomor sku",
+  "nama varian",
+  "channel",
+  "akun",
+  "jam",
+  "harga",
+  "pesanan",
+  "unit terjual",
+  "penjualan kotor",
+  "pengembalian dana",
+  "unit dikembalikan",
+  "diskon",
+  "promosi",
+  "penjualan bersih",
+  "pengguna",
+] as const;
+
 function normalize(value: unknown): string {
   return String(value ?? "")
     .normalize("NFKC")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function validateIsellerHeaders(rows: unknown[][]): HeaderValidation {
+  const normalizedRows = rows.map((row) => row.map(normalize));
+  const existingAnchors = [
+    "judul produk",
+    "nomor sku",
+    "unit terjual",
+    "penjualan bersih",
+    "unit dikembalikan",
+  ];
+  let headerIndex = normalizedRows.findIndex((headers) =>
+    existingAnchors.every((anchor) => headers.includes(anchor))
+  );
+  let ambiguous = false;
+
+  if (headerIndex < 0) {
+    const scores = normalizedRows.map((headers, index) => ({
+      index,
+      score: REQUIRED_ISELLER_HEADERS.filter((header) =>
+        headers.includes(header)
+      ).length,
+    }));
+    const highestScore = Math.max(0, ...scores.map((item) => item.score));
+    const candidates = scores.filter(
+      (item) => item.score === highestScore && item.score >= 2
+    );
+    if (candidates.length === 1) {
+      headerIndex = candidates[0].index;
+    } else {
+      ambiguous = candidates.length > 1;
+    }
+  }
+
+  const headers = headerIndex < 0 ? [] : normalizedRows[headerIndex];
+  const counts = new Map<string, number>();
+  for (const header of headers) {
+    if (header) counts.set(header, (counts.get(header) ?? 0) + 1);
+  }
+  const found = REQUIRED_ISELLER_HEADERS.filter(
+    (header) => (counts.get(header) ?? 0) > 0
+  );
+  const missing = REQUIRED_ISELLER_HEADERS.filter(
+    (header) => !counts.has(header)
+  );
+  const duplicates = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([header]) => header);
+  const requiredSet = new Set<string>(REQUIRED_ISELLER_HEADERS);
+  const unrecognized = headers.filter(
+    (header) => header && !requiredSet.has(header)
+  );
+
+  return {
+    headerIndex: headerIndex < 0 ? null : headerIndex,
+    headers,
+    found,
+    missing,
+    duplicates,
+    unrecognized,
+    ambiguous,
+    isValid:
+      headerIndex >= 0 &&
+      !ambiguous &&
+      missing.length === 0 &&
+      duplicates.length === 0,
+  };
+}
+
+function headerValidationError(validation: HeaderValidation): string {
+  const details = [
+    validation.missing.length
+      ? `Kolom wajib kurang/salah nama: ${validation.missing.join(", ")}.`
+      : "",
+    validation.duplicates.length
+      ? `Header duplikat: ${validation.duplicates.join(", ")}.`
+      : "",
+    validation.ambiguous
+      ? "Baris header tidak dapat dikenali dengan pasti."
+      : "",
+    validation.headerIndex === null && !validation.ambiguous
+      ? "Baris header iSeller tidak ditemukan."
+      : "",
+  ].filter(Boolean);
+
+  return details.join(" ") || "Header Excel tidak valid.";
 }
 
 function parseNumber(value: unknown): number {
@@ -152,59 +270,19 @@ function integer(value: number): string {
   return new Intl.NumberFormat("id-ID").format(value);
 }
 
-function parseIseller(rows: unknown[][]): SaleRow[] {
-  const headerIndex = rows.findIndex((row) => {
-    const values = row.map(normalize);
-
-    return (
-      values.includes("judul produk") &&
-      values.includes("nomor sku") &&
-      values.includes("unit terjual") &&
-      values.includes("penjualan bersih") &&
-      values.includes("unit dikembalikan")
-    );
-  });
-
-  if (headerIndex < 0) {
-    throw new Error(
-      "Gunakan Excel iSeller dengan header laporan penjualan yang benar."
-    );
+function parseIseller(
+  rows: unknown[][],
+  headerValidation: HeaderValidation
+): SaleRow[] {
+  if (!headerValidation.isValid || headerValidation.headerIndex === null) {
+    throw new Error(headerValidationError(headerValidation));
   }
 
-  const headers = rows[headerIndex].map(normalize);
+  const headerIndex = headerValidation.headerIndex;
+  const headers = headerValidation.headers;
 
   const column = (name: string) =>
     headers.indexOf(name);
-
-  const required = [
-    "judul produk",
-    "hari",
-    "tipe produk",
-    "nomor sku",
-    "nama varian",
-    "channel",
-    "akun",
-    "jam",
-    "harga",
-    "pesanan",
-    "unit terjual",
-    "penjualan kotor",
-    "pengembalian dana",
-    "unit dikembalikan",
-    "diskon",
-    "promosi",
-    "penjualan bersih"
-  ];
-
-  const missing = required.filter(
-    (name) => column(name) < 0
-  );
-
-  if (missing.length) {
-    throw new Error(
-      "Kolom tidak lengkap: " + missing.join(", ")
-    );
-  }
 
   const get = (
     row: unknown[],
@@ -264,9 +342,9 @@ function parseIseller(rows: unknown[][]): SaleRow[] {
       get(row, "akun") ?? ""
     ).trim();
 
-    const sourceUser = column("pengguna") >= 0
-      ? String(get(row, "pengguna") ?? "").trim()
-      : "";
+    const sourceUser = String(
+      get(row, "pengguna") ?? ""
+    ).trim();
 
     const hour = String(
       get(row, "jam") ?? ""
@@ -416,6 +494,8 @@ export default function SalesAnalyticsPage() {
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SaleRow[]>([]);
+  const [headerValidation, setHeaderValidation] =
+    useState<HeaderValidation | null>(null);
   const [skippedExisting, setSkippedExisting] = useState(0);
   const [skippedToday, setSkippedToday] = useState(0);
   const [newestImportedDate, setNewestImportedDate] = useState<string | null>(null);
@@ -467,6 +547,7 @@ export default function SalesAnalyticsPage() {
     setErrorMessage("");
     setSuccessMessage("");
     setPreview([]);
+    setHeaderValidation(null);
     setSkippedExisting(0);
     setSkippedToday(0);
     setNewestImportedDate(null);
@@ -485,11 +566,13 @@ export default function SalesAnalyticsPage() {
         selected
       )) as unknown as unknown[][];
 
-      const parsed = parseIseller(rows);
-      const hasUserColumn = rows.some((row) =>
-        row.map(normalize).includes("pengguna") &&
-        row.map(normalize).includes("nomor sku")
-      );
+      const validation = validateIsellerHeaders(rows);
+      setHeaderValidation(validation);
+      if (!validation.isValid) {
+        throw new Error(headerValidationError(validation));
+      }
+
+      const parsed = parseIseller(rows, validation);
 
       const { data: latestBatch, error: latestError } = await supabase
         .from("iseller_import_batches")
@@ -525,12 +608,6 @@ export default function SalesAnalyticsPage() {
         (row) => row.sale_date >= todayJakarta
       ).length;
 
-      if (!hasUserColumn) {
-        throw new Error(
-          "Kolom Pengguna belum ditemukan. Export ulang 18 kolom dari iSeller agar WhatsApp tidak hilang."
-        );
-      }
-
       if (newRows.length === 0) {
         throw new Error(
           `Tidak ada tanggal penjualan baru yang lengkap untuk diimport. ` +
@@ -554,6 +631,7 @@ export default function SalesAnalyticsPage() {
       setParsing(false);
     }
   }
+
 
   const summary = useMemo(() => {
     if (!preview.length) return null;
@@ -656,7 +734,12 @@ export default function SalesAnalyticsPage() {
   }, [preview]);
 
   async function handleImport() {
-    if (!file || !summary || uploading) return;
+    if (
+      !file ||
+      !summary ||
+      !headerValidation?.isValid ||
+      uploading
+    ) return;
 
     setUploading(true);
     setProgress(0);
@@ -888,7 +971,60 @@ export default function SalesAnalyticsPage() {
                 format Excel 18 kolom (termasuk Pengguna) dan Semua Channel.
               </p>
 
-              <div className="mt-5">
+              <div id="iseller-header-checklist" className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold">
+                    18 Kolom Wajib iSeller
+                  </h3>
+                  <span className="rounded-lg bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
+                    Urutan Kolom Bebas
+                  </span>
+                </div>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Pastikan semua nama kolom berikut dipilih saat export iSeller.
+                </p>
+
+                <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {REQUIRED_ISELLER_HEADERS.map((header, index) => {
+                    const found = headerValidation?.found.includes(header);
+                    const duplicate = headerValidation?.duplicates.includes(header);
+
+                    const style = !headerValidation
+                      ? "border-slate-200 bg-white text-slate-700"
+                      : found && !duplicate
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-red-200 bg-red-50 text-red-800";
+
+                    return (
+                      <li
+                        key={header}
+                        className={`flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm ${style}`}
+                      >
+                        <span className="shrink-0">
+                          {!headerValidation
+                            ? "\u2610"
+                            : found && !duplicate
+                              ? "\u2713"
+                              : "\u2717"}
+                        </span>
+                        <span className="capitalize">
+                          {index + 1}. {header}
+                          {duplicate ? " (duplikat)" : ""}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                <p className="mt-3 text-xs text-slate-500">
+                  {headerValidation
+                    ? `${headerValidation.found.length}/18 kolom ditemukan.`
+                    : "Validasi otomatis setelah file Excel dipilih."}
+                </p>
+              </div>
+
+              <div className="mt-5 flex min-w-0 flex-wrap items-center gap-3">
                 <input
                   type="file"
                   accept=".xlsx"
@@ -911,6 +1047,60 @@ export default function SalesAnalyticsPage() {
                 <p className="mt-4 text-sm text-slate-500">
                   Membaca dan memvalidasi Excel...
                 </p>
+              )}
+
+              {headerValidation && (
+                <div
+                  role="status"
+                  className={`mt-4 rounded-xl border p-4 text-sm ${
+                    headerValidation.isValid
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      : "border-red-300 bg-red-50 text-red-900"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="font-bold">
+                      Header {headerValidation.isValid ? "VALID" : "TIDAK VALID"}
+                    </h3>
+                    <p className="font-semibold">
+                      {headerValidation.found.length}/{REQUIRED_ISELLER_HEADERS.length} kolom wajib ditemukan
+                    </p>
+                  </div>
+                  {headerValidation.ambiguous && (
+                    <p className="mt-2">
+                      Baris header tidak dapat dikenali dengan pasti. Pastikan seluruh header berada pada satu baris.
+                    </p>
+                  )}
+                  {headerValidation.headerIndex !== null && (
+                    <p className="mt-1 text-xs">
+                      Baris header Excel: {headerValidation.headerIndex + 1}. Posisi kolom pada file bebas; nama header harus cocok.
+                    </p>
+                  )}
+
+
+                  {headerValidation.missing.length > 0 && (
+                    <p className="mt-3">
+                      <strong>Kurang atau salah nama:</strong>{" "}
+                      {headerValidation.missing.join(", ")}
+                    </p>
+                  )}
+                  {headerValidation.duplicates.length > 0 && (
+                    <p className="mt-2">
+                      <strong>Header duplikat:</strong>{" "}
+                      {headerValidation.duplicates.join(", ")}
+                    </p>
+                  )}
+                  {headerValidation.unrecognized.length > 0 && (
+                    <p className="mt-2">
+                      <strong>
+                        {headerValidation.missing.length > 0
+                          ? "Header lain / kemungkinan salah nama (atau kolom tambahan):"
+                          : "Kolom tambahan yang tidak dipakai:"}
+                      </strong>{" "}
+                      {headerValidation.unrecognized.join(", ")}
+                    </p>
+                  )}
+                </div>
               )}
 
               {summary && (
@@ -1000,7 +1190,12 @@ export default function SalesAnalyticsPage() {
 
                   <button
                     type="button"
-                    disabled={uploading}
+                    disabled={
+                      uploading ||
+                      parsing ||
+                      !headerValidation?.isValid ||
+                      !file
+                    }
                     onClick={() => void handleImport()}
                     className="mt-5 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
                   >

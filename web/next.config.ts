@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
 
+  experimental: {
+    agentUpgrade: "security",
+  },
+
   basePath,
 };
 

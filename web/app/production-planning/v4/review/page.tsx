@@ -97,6 +97,34 @@ type PreflightResult = {
   po_generation_enabled?: boolean;
 };
 
+function getBlockerAction(blocker: string) {
+  const message = blocker.toLowerCase();
+  if (/(sales|penjualan|iseller|fresh|kesegaran)/.test(message)) {
+    return {
+      href: "/sales-analytics",
+      label: "Buka Import Sales iSeller",
+      action: "Impor laporan terbaru dan pastikan batch berhasil diselesaikan.",
+    };
+  }
+  if (/(lifecycle|vendor|candidate|mapping|reconcil|sku|produk)/.test(message)) {
+    return {
+      href: "/production-planning/vendors",
+      label: "Buka Vendor Management",
+      action: "Cocokkan mapping Master, lifecycle, MOQ, dan lead time untuk SKU terkait.",
+    };
+  }
+  return null;
+}
+
+function displayBlocker(blocker: string) {
+  return blocker
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+      "ID terkait"
+    )
+    .replaceAll("_", " ");
+}
+
 const number = (value: unknown) => {
   const n = Number(value);
   return value == null || !Number.isFinite(n) ? 0 : n;
@@ -198,6 +226,7 @@ export default function ProductionReviewV42() {
   const [error, setError] = useState("");
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [readiness, setReadiness] = useState<ReadinessV1 | null>(null);
+  const [checkResultError, setCheckResultError] = useState("");
   const [checkingReadiness, setCheckingReadiness] = useState(false);
   const [checking, setChecking] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -340,7 +369,7 @@ export default function ProductionReviewV42() {
       const seen = new Set<string>();
       let finished = false;
 
-      for (let p = 0; p < 20; p++) {
+      for (let p = 0; p < 100; p++) {
         const { data, error: rpcError } = await db.rpc(
           "get_fashion_production_preview_v4",
           {
@@ -381,6 +410,7 @@ export default function ProductionReviewV42() {
       setItems(all);
       setPreflight(null);
       setReadiness(null);
+      setCheckResultError("");
       setDirty(false);
       setEdits({});
       setSavedEdits({});
@@ -394,8 +424,14 @@ export default function ProductionReviewV42() {
 
       await refreshDrafts();
 
+      const readyCount = all.filter(
+        (item) =>
+          item.v4_status === "SIMULATION_ONLY" &&
+          item.production_policy === "ACTIVE_SIMULATION_ONLY"
+      ).length;
       setMessage(
-        `${all.length} SKU berhasil dibaca. Siap membuat Draft Review.`
+        `${all.length} SKU dibaca: ${readyCount} siap untuk Draft, ` +
+          `${all.length - readyCount} ditunda karena perlu pemeriksaan.`
       );
     } catch (e) {
       setComplete(false);
@@ -454,6 +490,8 @@ export default function ProductionReviewV42() {
     }
 
     setPreflight(null);
+    setReadiness(null);
+    setCheckResultError("");
     const next = { ...edits };
 
     if (!value) {
@@ -493,6 +531,8 @@ export default function ProductionReviewV42() {
     if (!current) return;
 
     setPreflight(null);
+    setReadiness(null);
+    setCheckResultError("");
     const next = {
       ...edits,
       [id]: { ...current, ...patch },
@@ -587,10 +627,12 @@ export default function ProductionReviewV42() {
   }, [items, proposed]);
 
   async function checkReadiness() {
-    if (!batchId || checkingReadiness || busy || dirty) return;
+    if (!batchId || checkingReadiness || checking || busy || dirty) return;
 
     setCheckingReadiness(true);
     setReadiness(null);
+    setPreflight(null);
+    setCheckResultError("");
     setError("");
     setMessage("Memeriksa kesiapan sumber data WMS...");
 
@@ -610,7 +652,25 @@ export default function ProductionReviewV42() {
         result.batch_id !== batchId ||
         result.mode !== "SIMULATION_DATA" ||
         !result.sales ||
+        typeof result.sales.fresh !== "boolean" ||
+        (result.sales.last_sale_date !== null &&
+          typeof result.sales.last_sale_date !== "string") ||
+        (result.sales.age_days !== null &&
+          typeof result.sales.age_days !== "number") ||
+        typeof result.sales.rows !== "number" ||
+        !result.proposal ||
+        typeof result.proposal.sku_count !== "number" ||
+        typeof result.proposal.qty !== "number" ||
         !Array.isArray(result.models) ||
+        result.models.some(
+          (model) =>
+            !model ||
+            typeof model.product_code !== "string" ||
+            typeof model.vendor_ready_count !== "number" ||
+            typeof model.vendor_verified_count !== "number" ||
+            typeof model.candidate_only_count !== "number" ||
+            typeof model.preview_coverage_verified !== "boolean"
+        ) ||
         result.approval_enabled !== false ||
         result.po_generation_enabled !== false
       ) {
@@ -619,24 +679,25 @@ export default function ProductionReviewV42() {
 
       setReadiness(result);
       setMessage(
-        "Kesiapan data berhasil diperiksa. " +
-        "Data saat ini masih dalam mode simulasi."
+        result.sales.fresh
+          ? "Data penjualan memenuhi aturan freshness saat diperiksa. Hasil tetap mode simulasi."
+          : "BELUM SIAP: data penjualan perlu diperbarui melalui import iSeller."
       );
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Gagal membaca kesiapan data."
-      );
+      const reason = e instanceof Error ? e.message : "Gagal membaca kesiapan data.";
+      setError(reason);
+      setCheckResultError(reason);
     } finally {
       setCheckingReadiness(false);
     }
   }
   async function checkPreflight() {
-    if (!batchId || checking || loading || saving || dirty) return;
+    if (!batchId || checking || checkingReadiness || loading || saving || dirty) return;
 
     setChecking(true);
     setPreflight(null);
+    setReadiness(null);
+    setCheckResultError("");
     setError("");
     setMessage("Memeriksa Draft di server...");
 
@@ -660,24 +721,31 @@ export default function ProductionReviewV42() {
 
       if (
         !Array.isArray(result.blockers) ||
+        !result.blockers.every((blocker) => typeof blocker === "string") ||
         typeof result.blocker_count !== "number" ||
+        !Number.isInteger(result.blocker_count) ||
+        result.blocker_count < 0 ||
         typeof result.data_checks_passed !== "boolean" ||
         result.approval_enabled !== false ||
         result.po_generation_enabled !== false
       ) {
         throw new Error("Hasil validasi tidak lengkap atau tidak aman.");
       }
+      if (result.batch_id && result.batch_id !== batchId) {
+        throw new Error("Hasil pemeriksaan berasal dari Draft yang berbeda.");
+      }
 
       setPreflight(result);
 
       setMessage(
-        `Pemeriksaan selesai: ${result.blocker_count} kendala. ` +
-        "Approval dan pembuatan PO tetap terkunci."
+        result.data_checks_passed && result.blocker_count === 0
+          ? "LOLOS pemeriksaan server. Approval dan pembuatan PO tetap terkunci."
+          : `BELUM SIAP: ${result.blocker_count} kendala ditemukan.`
       );
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Pemeriksaan server gagal."
-      );
+      const reason = e instanceof Error ? e.message : "Pemeriksaan server gagal.";
+      setError(reason);
+      setCheckResultError(reason);
       setMessage("Draft belum berhasil divalidasi.");
     } finally {
       setChecking(false);
@@ -712,6 +780,7 @@ export default function ProductionReviewV42() {
     setError("");
     setPreflight(null);
     setReadiness(null);
+    setCheckResultError("");
     setSkuSaveStates((previous) => ({
       ...previous,
       [variantId]: "saving",
@@ -797,6 +866,7 @@ export default function ProductionReviewV42() {
     setError("");
     setPreflight(null);
     setReadiness(null);
+    setCheckResultError("");
     setSkuSaveStates((previous) => {
       const updated = { ...previous };
       for (const [id] of work) updated[id] = "saving";
@@ -1048,6 +1118,7 @@ export default function ProductionReviewV42() {
       setDirty(false);
       setPreflight(null);
       setReadiness(null);
+      setCheckResultError("");
 
       setMessage(
         `Draft dibuka: ${Object.keys(restored).length} SKU` +
@@ -1073,6 +1144,61 @@ export default function ProductionReviewV42() {
   }
 
   const busy = loading || saving;
+  const proposedItems = proposed
+    .filter(([, edit]) => number(edit.qty) > 0)
+    .map(([variantId]) => eligible.find((item) => item.variant_id === variantId))
+    .filter((item): item is PlanningItem => !!item);
+  const proposedProductCodes = new Set(
+    proposedItems.map((item) => item.product_code.trim().toUpperCase())
+  );
+  const readinessModelsForDraft = readiness
+    ? readiness.models.filter((model) =>
+        proposedProductCodes.has(model.product_code.trim().toUpperCase())
+      )
+    : [];
+  const readinessLifecycleIssues: string[] = [];
+  if (readiness) {
+    if (proposedItems.length === 0) {
+      readinessLifecycleIssues.push("Draft belum memiliki SKU dengan jumlah usulan lebih dari nol.");
+    } else {
+      for (const productCode of proposedProductCodes) {
+        const models = readinessModelsForDraft.filter(
+          (model) => model.product_code.trim().toUpperCase() === productCode
+        );
+        if (models.length === 0) {
+          readinessLifecycleIssues.push(
+            `Data vendor/lifecycle untuk produk ${productCode} tidak dikembalikan server.`
+          );
+          continue;
+        }
+        if (models.some((model) => !model.preview_coverage_verified)) {
+          readinessLifecycleIssues.push(
+            `Cakupan mapping produk ${productCode} belum terverifikasi.`
+          );
+        }
+        const candidateOnlyCount = models.reduce(
+          (sum, model) => sum + number(model.candidate_only_count),
+          0
+        );
+        if (candidateOnlyCount > 0) {
+          readinessLifecycleIssues.push(
+            `${candidateOnlyCount} mapping kandidat produk ${productCode} masih perlu direkonsiliasi.`
+          );
+        }
+        const readyVendorCount = models.reduce(
+          (sum, model) => sum + number(model.vendor_ready_count),
+          0
+        );
+        if (readyVendorCount === 0) {
+          readinessLifecycleIssues.push(
+            `Belum ada vendor siap untuk produk ${productCode}.`
+          );
+        }
+      }
+    }
+  }
+  const readinessPassed =
+    !!readiness?.sales.fresh && readinessLifecycleIssues.length === 0;
 
   return (
     <main className="w-full min-w-0 max-w-full overflow-x-clip px-4 pt-6 pb-64 md:px-8 md:pb-44">
@@ -1158,6 +1284,8 @@ export default function ProductionReviewV42() {
                 setHasSimulationRequest(false);
                 setDirty(false);
                 setPreflight(null);
+                setReadiness(null);
+                setCheckResultError("");
                 setMessage("Draft baru siap diedit.");
               }}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-40"
@@ -1242,7 +1370,7 @@ export default function ProductionReviewV42() {
 
             {batchId && (
               <span className="text-xs text-slate-500">
-                Draft aktif: {batchId}
+                Draft aktif · {proposedItems.length} SKU usulan
               </span>
             )}
           </div>
@@ -1259,6 +1387,8 @@ export default function ProductionReviewV42() {
                 nextNotes !== savedNotes
               );
               setPreflight(null);
+              setReadiness(null);
+              setCheckResultError("");
             }}
             placeholder="Catatan umum review produksi..."
             className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -1304,7 +1434,7 @@ export default function ProductionReviewV42() {
 
             <button
               type="button"
-              disabled={!batchId || busy || dirty || checkingReadiness}
+              disabled={!batchId || busy || dirty || checkingReadiness || checking}
               onClick={() => void checkReadiness()}
               className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold disabled:opacity-40"
             >
@@ -1314,7 +1444,7 @@ export default function ProductionReviewV42() {
             </button>
             <button
               type="button"
-              disabled={!complete || !batchId || busy || checking || dirty}
+              disabled={!complete || !batchId || busy || checking || checkingReadiness || dirty}
               onClick={() => void checkPreflight()}
               className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold disabled:opacity-40"
             >
@@ -1330,6 +1460,124 @@ export default function ProductionReviewV42() {
               Ajukan Approval — Belum Aktif
             </button>
           </div>
+          {checkResultError && (
+            <section
+              role="alert"
+              className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900"
+            >
+              <p className="font-bold">BELUM SIAP — pemeriksaan gagal dijalankan.</p>
+              <p className="mt-1">{displayBlocker(checkResultError)}</p>
+              <p className="mt-1 text-xs">
+                Pastikan Draft tersimpan, lalu ulangi. Jika berulang, minta Owner/Admin
+                memeriksa pesan server ini.
+              </p>
+            </section>
+          )}
+          {preflight && (
+            <section
+              role="status"
+              className={`mt-2 max-h-40 overflow-y-auto rounded-lg border p-3 text-sm ${
+                preflight.data_checks_passed && preflight.blocker_count === 0
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                  : "border-amber-300 bg-amber-50 text-amber-950"
+              }`}
+            >
+              <p className="font-bold">
+                {preflight.data_checks_passed && preflight.blocker_count === 0
+                  ? "LOLOS — pemeriksaan awal server."
+                  : "BELUM SIAP — pemeriksaan server menemukan kendala."}
+              </p>
+              <p className="mt-1">
+                {proposedItems.length} SKU usulan · {fmt(proposedQty)} pcs ·{" "}
+                {preflight.blocker_count ?? 0} kendala. Ini bukan persetujuan operasional.
+              </p>
+              {preflight.blockers && preflight.blockers.length > 0 ? (
+                <ul className="mt-2 space-y-2">
+                  {preflight.blockers.map((blocker, index) => {
+                    const action = getBlockerAction(blocker);
+                    return (
+                      <li key={`${index}-${blocker}`}>
+                        <p>{displayBlocker(blocker)}</p>
+                        {action && (
+                          <p className="mt-1">
+                            {action.action}{" "}
+                            <Link className="font-semibold underline" href={action.href}>
+                              {action.label}
+                            </Link>
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                preflight.blocker_count !== 0 && (
+                  <p className="mt-2">
+                    Rincian kendala tidak diberikan server. Minta Owner/Admin memeriksa
+                    hasil RPC; jangan mengajukan Draft.
+                  </p>
+                )
+              )}
+            </section>
+          )}
+          {readiness && (
+            <section
+              role="status"
+              className={`mt-2 max-h-40 overflow-y-auto rounded-lg border p-3 text-sm ${
+                readinessPassed
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                  : "border-amber-300 bg-amber-50 text-amber-950"
+              }`}
+            >
+              <p className="font-bold">
+                {readinessPassed
+                  ? "LOLOS — sumber data memenuhi pemeriksaan awal."
+                  : "BELUM SIAP — masih ada data yang harus diperbarui atau direkonsiliasi."}
+              </p>
+              <p className="mt-1">
+                Draft: {proposedItems.length} SKU usulan · {fmt(proposedQty)} pcs.
+              </p>
+              <p className="mt-1">
+                Penjualan iSeller: {readiness.sales.fresh ? "LOLOS" : "BELUM SIAP"} ·
+                {" "}terakhir {readiness.sales.last_sale_date ?? "tidak tersedia"} ·
+                {" "}umur {readiness.sales.age_days ?? "tidak diketahui"} hari ·
+                {" "}{readiness.sales.rows} baris.
+              </p>
+              {!readiness.sales.fresh && (
+                <p className="mt-1">
+                  Impor laporan iSeller terbaru melalui{" "}
+                  <Link className="font-semibold underline" href="/sales-analytics">
+                    Sales Analytics
+                  </Link>
+                  {" "}dan pastikan batch berhasil diselesaikan.
+                </p>
+              )}
+              {readinessLifecycleIssues.length > 0 && (
+                <>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    {readinessLifecycleIssues.map((issue) => (
+                      <li key={issue}>{issue}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1">
+                    Periksa mapping Master, lifecycle, MOQ, dan lead time satu per satu di{" "}
+                    <Link
+                      className="font-semibold underline"
+                      href="/production-planning/vendors"
+                    >
+                      Vendor Management
+                    </Link>
+                    . Minta Owner/Admin melakukan verifikasi jika akses edit tidak tersedia.
+                  </p>
+                </>
+              )}
+              {readinessPassed && (
+                <p className="mt-1 text-xs">
+                  Hasil ini hanya pemeriksaan data simulasi; bukan approval atau izin membuat PO.
+                </p>
+              )}
+            </section>
+          )}
           </div>
         </div>
         <section className="min-w-0 rounded-xl border border-slate-200 bg-white">
@@ -1580,10 +1828,24 @@ export default function ProductionReviewV42() {
                     ? "Terbaru menurut aturan 2 hari"
                     : "Perlu diperbarui sebelum Go-Live"}
                 </p>
+                {!readiness.sales.fresh && (
+                  <Link
+                    className="mt-1 inline-block font-semibold text-indigo-700 underline"
+                    href="/sales-analytics"
+                  >
+                    Impor laporan iSeller terbaru
+                  </Link>
+                )}
               </div>
 
               <div className="mt-3 space-y-3">
-                {readiness.models.map((m, i) => (
+                {readinessModelsForDraft.length === 0 && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Server tidak mengembalikan data lifecycle untuk SKU yang diusulkan.
+                    Periksa kode produk dan mapping vendor di Vendor Management.
+                  </p>
+                )}
+                {readinessModelsForDraft.map((m, i) => (
                   <div
                     key={`${m.product_code}-${i}`}
                     className="rounded-lg border border-slate-200 p-3 text-sm"
@@ -1620,9 +1882,21 @@ export default function ProductionReviewV42() {
                       {" "}
                       {m.candidate_only_count}
                     </p>
-                    <p className="font-semibold text-amber-800">
-                      Cakupan terhadap preview V4 belum diverifikasi penuh
+                    <p className={`font-semibold ${m.preview_coverage_verified ? "text-emerald-700" : "text-amber-800"}`}>
+                      {m.preview_coverage_verified
+                        ? "Cakupan mapping V4 terverifikasi"
+                        : "Cakupan mapping V4 belum terverifikasi"}
                     </p>
+                    {(m.candidate_only_count > 0 ||
+                      m.vendor_ready_count === 0 ||
+                      !m.preview_coverage_verified) && (
+                      <Link
+                        className="mt-2 inline-block font-semibold text-indigo-700 underline"
+                        href="/production-planning/vendors"
+                      >
+                        Rekonsiliasi mapping dan lifecycle vendor
+                      </Link>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1641,10 +1915,14 @@ export default function ProductionReviewV42() {
         {preflight && (
           <section
             role="status"
-            className="rounded-xl border border-amber-300 bg-amber-50 p-4"
+            className={`rounded-xl border p-4 ${
+              preflight.data_checks_passed && preflight.blocker_count === 0
+                ? "border-emerald-300 bg-emerald-50"
+                : "border-amber-300 bg-amber-50"
+            }`}
           >
             <h2 className="font-bold text-slate-900">
-              Hasil Pemeriksaan Server V4.2B
+              Hasil Pemeriksaan Server
             </h2>
 
             <p className="mt-2 text-sm">
@@ -1655,19 +1933,34 @@ export default function ProductionReviewV42() {
               Kendala: {preflight.blocker_count ?? "—"}
             </p>
 
-            <p className="mt-2 font-semibold text-amber-900">
-              {preflight.data_checks_passed
-                ? "Pemeriksaan awal tanpa kendala. Belum merupakan persetujuan."
-                : "Belum layak diajukan. Periksa kendala berikut."}
+            <p className={`mt-2 font-semibold ${
+              preflight.data_checks_passed && preflight.blocker_count === 0
+                ? "text-emerald-800"
+                : "text-amber-900"
+            }`}>
+              {preflight.data_checks_passed && preflight.blocker_count === 0
+                ? "LOLOS pemeriksaan awal. Ini belum merupakan persetujuan."
+                : "BELUM SIAP. Perbaiki kendala sebelum melanjutkan."}
             </p>
 
             {preflight.blockers && preflight.blockers.length > 0 && (
               <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-red-800">
-                {preflight.blockers.map((blocker, index) => (
-                  <li key={`${index}-${blocker}`}>
-                    {blocker.replaceAll("_", " ")}
-                  </li>
-                ))}
+                {preflight.blockers.map((blocker, index) => {
+                  const action = getBlockerAction(blocker);
+                  return (
+                    <li key={`${index}-${blocker}`}>
+                      {displayBlocker(blocker)}
+                      {action && (
+                        <p className="mt-1 text-slate-700">
+                          {action.action}{" "}
+                          <Link className="font-semibold underline" href={action.href}>
+                            {action.label}
+                          </Link>
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
 

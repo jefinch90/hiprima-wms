@@ -20,6 +20,7 @@ type NavigationLink = {
   href: string;
   visible: boolean;
   simulation?: boolean;
+  advancedOnly?: boolean;
   exact?: boolean;
   activePaths?: string[];
 };
@@ -130,6 +131,8 @@ export default function Sidebar() {
     role === "owner" ||
     role === "admin" ||
     role === "warehouse_manager";
+  const canManageProductionPlanning =
+    role === "owner" || role === "admin";
 
   const navItems: NavigationItem[] = [
     {
@@ -170,27 +173,53 @@ export default function Sidebar() {
       visible: canAccessProductionPlanning,
       children: [
         {
-          label: "Dashboard & Simulasi",
-          href: "/production-planning/",
-          visible: true,
-          exact: true,
-        },
-        {
-          label: "Review & Approval",
-          href: "/production-planning/v4/review/",
+          label: "Rencana Produksi",
+          href: "/production-planning/v4/",
           visible: true,
           simulation: true,
-          activePaths: ["/production-planning/v4/po-preview"],
         },
         {
-          label: "Production Orders",
+          label: "Review & Persetujuan",
+          href: "/production-planning/v4/operations/",
+          visible: true,
+        },
+        {
+          label: "Purchase Order",
           href: "/production-planning/orders/",
           visible: true,
         },
         {
+          label: "Review Simulasi (bukan persetujuan operasional)",
+          href: "/production-planning/v4/review/",
+          visible: true,
+          simulation: true,
+          advancedOnly: true,
+        },
+        {
           label: "Vendor Management",
           href: "/production-planning/vendors/",
-          visible: true,
+          visible: canManageProductionPlanning,
+          advancedOnly: true,
+        },
+        {
+          label: "Review MOQ",
+          href: "/production-planning/v4/moq/",
+          visible: canManageProductionPlanning,
+          advancedOnly: true,
+        },
+        {
+          label: "Preview PO Simulasi",
+          href: "/production-planning/v4/po-preview/",
+          visible: canManageProductionPlanning,
+          simulation: true,
+          advancedOnly: true,
+        },
+        {
+          label: "Planning V2 (lama)",
+          href: "/production-planning/",
+          visible: canManageProductionPlanning,
+          exact: true,
+          advancedOnly: true,
         },
       ],
     },
@@ -281,6 +310,7 @@ export default function Sidebar() {
                         className="ml-3 mt-1 min-w-0 space-y-1 border-l border-slate-200 pl-3"
                       >
                         {item.children.map((child) => {
+                          if (child.advancedOnly || !child.visible) return null;
                           const childActive =
                             activeMenu(child.href, child.exact) ||
                             (child.activePaths?.some((path) =>
@@ -313,6 +343,44 @@ export default function Sidebar() {
                             </Link>
                           );
                         })}
+                        {canManageProductionPlanning && (
+                          <details className="pt-1">
+                            <summary className="cursor-pointer rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                              Pengaturan lanjutan
+                            </summary>
+                            <div className="mt-1 space-y-1">
+                              {item.children
+                                .filter((child) => child.advancedOnly && child.visible)
+                                .map((child) => {
+                                  const childActive =
+                                    activeMenu(child.href, child.exact) ||
+                                    (child.activePaths?.some((path) =>
+                                      activeMenu(path)
+                                    ) ?? false);
+                                  return (
+                                    <Link
+                                      key={child.href}
+                                      href={child.href}
+                                      aria-current={childActive ? "page" : undefined}
+                                      onClick={() => setMobileOpen(false)}
+                                      className={
+                                        childActive
+                                          ? "flex min-w-0 items-center justify-between gap-2 rounded-lg bg-indigo-50 px-3 py-2.5 text-xs font-semibold text-indigo-900 ring-1 ring-inset ring-indigo-200"
+                                          : "flex min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                                      }
+                                    >
+                                      <span className="min-w-0 break-words">{child.label}</span>
+                                      {child.simulation && (
+                                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                                          Simulasi
+                                        </span>
+                                      )}
+                                    </Link>
+                                  );
+                                })}
+                            </div>
+                          </details>
+                        )}
                       </div>
                     )}
                   </div>
