@@ -46,6 +46,16 @@ export default function ProductionOrdersPage() {
   const [bulkSelection,setBulkSelection]=useState<Record<string,boolean>>({});
   const [bulkVendorIds,setBulkVendorIds]=useState<Record<string,string>>({});
   const [bulkNumbers,setBulkNumbers]=useState<Record<string,string>>({});
+// HIPRIMA_PO_UI_V43F: filter dan navigasi PO hanya pada sisi UI.
+  const [poSearch,setPoSearch]=useState("");
+  const [poStatusFilter,setPoStatusFilter]=useState("ALL");
+  const [poPage,setPoPage]=useState(1);
+  // HIPRIMA_PO_UI_V43G: local UI search/filter/pagination, no new RPC or DB writes.
+  const [poSkuQuery,setPoSkuQuery]=useState("");
+  const [poProductFilter,setPoProductFilter]=useState("ALL");
+  const [poSkuPage,setPoSkuPage]=useState(1);
+
+  const [showPoPreview,setShowPoPreview]=useState(false);
   const [bulkConfirmed,setBulkConfirmed]=useState(false);
 
   const reload = useCallback(async () => {
@@ -111,6 +121,182 @@ export default function ProductionOrdersPage() {
   }
   const selectedOrder=orders.find(o=>o.id===selected);
   const selectedLines=lines.filter(l=>l.po_id===selected);
+const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_name || "Vendor tidak ditemukan";
+  const filteredPo=orders.filter(o=>{
+    const query=poSearch.trim().toLowerCase();
+    return (poStatusFilter==="ALL"||o.status===poStatusFilter) &&
+      (!query||o.po_number.toLowerCase().includes(query)||poVendorName(o.vendor_id).toLowerCase().includes(query));
+  });
+  const poPageSize=15;
+  const poPageCount=Math.max(1,Math.ceil(filteredPo.length/poPageSize));
+  const poPageSafe=Math.min(poPage,poPageCount);
+  const visiblePo=filteredPo.slice((poPageSafe-1)*poPageSize,poPageSafe*poPageSize);
+  const selectedOrdered=selectedLines.reduce((sum,l)=>sum+l.ordered_qty,0);
+  const selectedReceived=selectedLines.reduce((sum,l)=>sum+l.received_qty,0);
+  const selectedRemaining=selectedLines.reduce((sum,l)=>sum+l.remaining_qty,0);
+  function selectPoAndScroll(id:string){
+    setSelected(id);
+    setShowPoPreview(false);
+    window.requestAnimationFrame(()=>document.getElementById("po-detail")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+
+  // PDF hanya berisi data yang benar-benar tersedia. Harga vendor disimpan terpisah
+  // dan tidak boleh disimpulkan dari HPP master/angka referensi.
+  async function downloadPoQuantityPdf(){
+    if(!selectedOrder || selectedOrder.status!=="FINAL"){
+      setError("PDF hanya untuk PO berstatus FINAL.");return;
+    }
+    if(selectedLines.length===0){setError("PO belum memiliki item.");return;}
+    if(!window.confirm("PDF ini hanya rincian jumlah pesanan, BELUM memuat harga vendor terverifikasi. Pastikan penawaran harga resmi telah disetujui sebelum dikirim ke vendor. Lanjutkan download?")) return;
+    setError("");
+    try {
+      const {jsPDF}=await import("jspdf");
+      const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+      const vendor=poVendorName(selectedOrder.vendor_id);
+      const dateText=(value:string|null)=>value ? new Date(value+"T00:00:00").toLocaleDateString("id-ID",{day:"2-digit",month:"long",year:"numeric"}):"Belum ditentukan";
+      let y=16;
+      const left=16;
+      const right=194;
+      function pageHeader(continued=false){
+        pdf.setFillColor(15,23,42);pdf.rect(0,0,210,10,"F");
+        pdf.setTextColor(15,23,42);pdf.setFont("helvetica","bold");pdf.setFontSize(16);
+        pdf.text("Hi.PRIMA",left,23);
+        pdf.setFontSize(8);pdf.setFont("helvetica","normal");pdf.setTextColor(100,116,139);
+        pdf.text("PT Prima Berkah Mulia",left,29);
+        pdf.setTextColor(15,23,42);pdf.setFont("helvetica","bold");pdf.setFontSize(11);
+        pdf.text(continued?"RINCIAN PO - LANJUTAN":"RINCIAN ORDER PRODUKSI",right,23,{align:"right"});
+        pdf.setFont("helvetica","normal");pdf.setFontSize(8);
+        pdf.text("Status: FINAL  |  Dokumen kuantitas",right,29,{align:"right"});
+        y=38;
+      }
+      function footer(){
+        pdf.setDrawColor(226,232,240);pdf.line(left,280,right,280);
+        pdf.setFontSize(8);pdf.setTextColor(100,116,139);
+        pdf.text("Dokumen elektronik WMS Hi.PRIMA - harga berdasarkan kesepakatan vendor terpisah",left,286);
+      }
+      function tableHeader(){
+        pdf.setFillColor(241,245,249);pdf.rect(left,y,right-left,9,"F");
+        pdf.setTextColor(30,41,59);pdf.setFont("helvetica","bold");pdf.setFontSize(8);
+        pdf.text("NO",left+3,y+6);pdf.text("SKU",left+14,y+6);
+        pdf.text("PRODUK",left+59,y+6);pdf.text("QTY",right-5,y+6,{align:"right"});
+        y+=10;
+      }
+      pageHeader();
+      pdf.setFont("helvetica","normal");pdf.setTextColor(51,65,85);pdf.setFontSize(9);
+      pdf.text("Nomor PO",left,44);pdf.text(": "+selectedOrder.po_number,left+36,44);
+      pdf.text("Vendor",left,51);pdf.text(": "+vendor,left+36,51);
+      pdf.text("Tanggal PO",left,58);pdf.text(": "+dateText(selectedOrder.order_date),left+36,58);
+      pdf.text("Estimasi tiba",left,65);pdf.text(": "+dateText(selectedOrder.eta_date),left+36,65);
+      pdf.setDrawColor(226,232,240);pdf.line(left,71,right,71);y=77;
+      tableHeader();
+      selectedLines.forEach((line,index)=>{
+        const sku=pdf.splitTextToSize(String(line.source_sku||"-"),40);
+        const name=pdf.splitTextToSize(String(line.source_product_name||"-"),90);
+        const rowH=Math.max(10,Math.max(sku.length,name.length)*4+6);
+        if(y+rowH>269){footer();pdf.addPage();pageHeader(true);tableHeader();}
+        if(index%2===1){pdf.setFillColor(248,250,252);pdf.rect(left,y,right-left,rowH,"F");}
+        pdf.setTextColor(30,41,59);pdf.setFont("helvetica","normal");pdf.setFontSize(8);
+        pdf.text(String(index+1),left+3,y+6);
+        pdf.text(sku,left+14,y+6);pdf.text(name,left+59,y+6);
+        pdf.setFont("helvetica","bold");pdf.text(String(line.ordered_qty),right-5,y+6,{align:"right"});
+        y+=rowH;
+      });
+      if(y+30>269){footer();pdf.addPage();pageHeader(true);}
+      pdf.setDrawColor(203,213,225);pdf.line(left,y+1,right,y+1);
+      pdf.setFont("helvetica","bold");pdf.setFontSize(10);pdf.setTextColor(15,23,42);
+      pdf.text("TOTAL PESANAN: "+selectedOrdered.toLocaleString("id-ID")+" pcs",right,y+9,{align:"right"});
+      pdf.setFont("helvetica","normal");pdf.setFontSize(8);pdf.setTextColor(100,116,139);
+      const notes=pdf.splitTextToSize("CATATAN: Dokumen ini tidak memuat harga satuan atau total nilai PO. Lampirkan penawaran harga vendor yang telah disetujui. Jangan menggunakan HPP master sebagai harga kesepakatan tanpa verifikasi.",right-left);
+      pdf.text(notes,left,y+18);
+      footer();
+      const safe=(s:string)=>s.replace(/[^A-Za-z0-9_-]+/g,"-").slice(0,60);
+      pdf.save("PO-"+safe(selectedOrder.po_number)+"-"+safe(vendor)+"-RincianQty.pdf");
+    }catch(e){setError("Gagal membuat PDF: "+(e instanceof Error?e.message:String(e)));}
+  }
+
+  useEffect(()=>{setPoSkuQuery("");setPoProductFilter("ALL");setPoSkuPage(1);},[selected]);
+  const poProductName=(l:Line)=>String(l.source_product_name||"Tanpa Nama Produk").trim()||"Tanpa Nama Produk";
+  const poProducts=Array.from(new Set(selectedLines.map(poProductName))).sort((a,b)=>a.localeCompare(b,"id"));
+  const filteredPoLines=selectedLines.filter(l=>{
+    const query=poSkuQuery.trim().toLocaleLowerCase("id");
+    const matchProduct=poProductFilter==="ALL"||poProductName(l)===poProductFilter;
+    const matchQuery=!query||[l.source_sku,l.source_product_name,l.progress,l.tracking_status].join(" ").toLocaleLowerCase("id").includes(query);
+    return matchProduct&&matchQuery;
+  }).sort((a,b)=>poProductName(a).localeCompare(poProductName(b),"id")||String(a.source_sku||"").localeCompare(String(b.source_sku||""),"id"));
+  const skuPageSize=12;
+  const skuPageCount=Math.max(1,Math.ceil(filteredPoLines.length/skuPageSize));
+  const skuPageSafe=Math.min(poSkuPage,skuPageCount);
+  const visiblePoLines=filteredPoLines.slice((skuPageSafe-1)*skuPageSize,skuPageSafe*skuPageSize);
+
+
+  async function downloadPoQuantityExcel(){
+    if(!selectedOrder||selectedOrder.status!=="FINAL"){
+      setError("Excel hanya tersedia untuk PO FINAL.");return;
+    }
+    if(selectedLines.length===0){setError("PO belum memiliki item.");return;}
+    const accepted=window.confirm("Excel ini hanya rincian kuantitas PO. Harga vendor dan total nilai komersial belum terverifikasi. Jangan kirim sebagai PO komersial tanpa kesepakatan harga resmi. Lanjutkan download Excel Qty?");
+    if(!accepted)return;
+    setError("");
+    try{
+      const {Workbook}=await import("exceljs");
+      const workbook=new Workbook();
+      workbook.creator="Hi.PRIMA WMS";
+      workbook.subject="Rincian kuantitas Purchase Order - tidak mencakup harga vendor";
+      const sheet=workbook.addWorksheet("Rincian PO",{views:[{state:"frozen",ySplit:8}]});
+      sheet.columns=[
+        {key:"no",width:7},{key:"sku",width:27},{key:"product",width:38},
+        {key:"ordered",width:15},{key:"received",width:15},{key:"remaining",width:18},
+        {key:"progress",width:23},{key:"eta",width:19},{key:"item_status",width:28}
+      ];
+      sheet.mergeCells("A1:I1");sheet.getCell("A1").value="Hi.PRIMA | PT Prima Berkah Mulia";
+      sheet.getCell("A1").font={bold:true,size:16,color:{argb:"FF0F172A"}};
+      sheet.getRow(1).height=28;
+      sheet.mergeCells("A2:I2");sheet.getCell("A2").value="RINCIAN ORDER PRODUKSI - KUANTITAS SAJA";
+      sheet.getCell("A2").font={bold:true,size:12,color:{argb:"FF334155"}};
+      sheet.getCell("A3").value="Nomor PO";sheet.getCell("B3").value=selectedOrder.po_number;
+      sheet.getCell("D3").value="Vendor";sheet.getCell("E3").value=poVendorName(selectedOrder.vendor_id);
+      sheet.getCell("A4").value="Tanggal";sheet.getCell("B4").value=selectedOrder.order_date;
+      sheet.getCell("D4").value="ETA";sheet.getCell("E4").value=selectedOrder.eta_date||"Belum ditetapkan";
+      sheet.getCell("A5").value="Status";sheet.getCell("B5").value="FINAL";
+      sheet.mergeCells("A6:I6");sheet.getCell("A6").value="PENTING: Tidak memuat harga vendor terverifikasi. Bukan dokumen komersial tanpa persetujuan harga.";
+      sheet.getCell("A6").font={bold:true,color:{argb:"FF92400E"}};
+      sheet.getCell("A6").fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFFFF3CC"}};
+      sheet.getRow(6).height=27;
+      const header=sheet.getRow(8);
+      header.values=["No","SKU / Varian","Nama Produk","Qty PO","Diterima","Belum Datang","Progres Vendor","ETA Item","Status Item"];
+      header.height=24;
+      header.font={bold:true,color:{argb:"FFFFFFFF"}};
+      header.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF172554"}};
+      header.alignment={vertical:"middle"};
+      sheet.autoFilter={from:"A8",to:"I8"};
+      const sortedLines=[...selectedLines].sort((a,b)=>poProductName(a).localeCompare(poProductName(b),"id")||String(a.source_sku).localeCompare(String(b.source_sku),"id"));
+      sortedLines.forEach((l,index)=>{
+        const row=sheet.addRow([index+1,String(l.source_sku||""),poProductName(l),
+          Number(l.ordered_qty)||0,Number(l.received_qty)||0,Number(l.remaining_qty)||0,
+          display(l.progress),l.eta_date||"",display(l.tracking_status)]);
+        row.alignment={vertical:"middle",wrapText:true};
+        row.height=22;
+        if(index%2===1)row.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+        for(const column of [4,5,6])row.getCell(column).numFmt="#,##0";
+      });
+      const totalRow=sheet.addRow(["","","TOTAL",selectedOrdered,selectedReceived,selectedRemaining,"","",""]);
+      totalRow.font={bold:true,color:{argb:"FF0F172A"}};
+      totalRow.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFDDE8F4"}};
+      totalRow.height=25;
+      for(const column of [4,5,6])totalRow.getCell(column).numFmt="#,##0";
+      sheet.pageSetup={paperSize:9,orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0};
+      const bytes=await workbook.xlsx.writeBuffer();
+      const blob=new Blob([bytes as unknown as BlobPart],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      const safe=(s:string)=>s.replace(/[^A-Za-z0-9_-]+/g,"-").slice(0,60);
+      a.href=url;
+      a.download="PO-"+safe(selectedOrder.po_number)+"-"+safe(poVendorName(selectedOrder.vendor_id))+"-RincianQty.xlsx";
+      document.body.appendChild(a);a.click();a.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+    }catch(e){setError("Gagal membuat Excel: "+(e instanceof Error?e.message:String(e)));}
+  }
+
   const groups=useMemo(()=> {
     const map=new Map<string,{key:string;vendor:string;date:string;rows:number;qty:number;ready:number;imported:number}>();
     for(const x of initial){const key=x.vendor_raw+"|"+x.source_date;
@@ -150,7 +336,7 @@ export default function ProductionOrdersPage() {
             <h2 className="text-lg font-bold">Review PO dari Excel</h2><p className="text-sm text-slate-600">Satu kelompok vendor + tanggal belum tentu satu PO resmi. Periksa nomor PO dan pemetaan vendor sebelum mengubahnya menjadi Draft. Tidak ada incoming aktif sampai PO difinalisasi.</p>
             <div className="overflow-x-auto"><table className="min-w-[820px] w-full text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">Tanggal</th><th className="p-2">Vendor Sumber</th><th className="p-2">Baris</th><th className="p-2">Qty</th><th className="p-2">Ready</th><th className="p-2">Sudah Dipindah</th><th className="p-2">Tindakan</th></tr></thead><tbody>{groups.map(g=><tr key={g.key} className="border-b"><td className="p-2">{g.date}</td><td className="p-2">{g.vendor}</td><td className="p-2">{g.rows}</td><td className="p-2">{money(g.qty)}</td><td className="p-2">{money(g.ready)}</td><td className="p-2">{g.imported}/{g.rows}</td><td className="p-2"><button disabled={busy||g.imported===g.rows} className={soft} onClick={()=>{setGroupKey(g.key);setPoDate(g.date);setPoNumber("");setVendorId("");}}>Pilih Grup</button></td></tr>)}</tbody></table></div>
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <h3 className="font-bold">Konversi Beberapa Grup Sekaligus â€” Hanya Draft</h3>
+              <h3 className="font-bold">Konversi Beberapa Grup Sekaligus  -  Hanya Draft</h3>
               <p className="text-xs text-amber-800">Penting: satu grup vendor + tanggal belum tentu satu PO sebenarnya. Hanya centang grup yang sudah dipastikan satu pesanan, belum diimpor, dan vendor master-nya benar. Barang Ready at Vendor historis harus dicek apakah sudah pernah diterima sebelum PO difinalisasi.</p>
               <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead><tr className="border-b"><th className="p-2">Pilih</th><th className="p-2">Tanggal / vendor sumber</th><th className="p-2">Qty / baris</th><th className="p-2">Vendor Master (wajib)</th><th className="p-2">Nomor PO historis</th></tr></thead><tbody>
                 {groups.filter(g=>g.imported<g.rows).map(g=><tr key={g.key} className="border-b align-top">
@@ -176,7 +362,7 @@ export default function ProductionOrdersPage() {
             </div>}
           </section> : <>
             <section className="space-y-3 rounded-xl border bg-white p-4">
-              <h2 className="text-lg font-bold">Buat PO Baru (Draft)</h2>
+              <details><summary className="cursor-pointer text-base font-bold text-slate-900">+ Buat PO Baru (Draft)</summary><div className="mt-3 space-y-3">
               <div className="grid gap-3 md:grid-cols-5">
                 <div className="flex min-h-[42px] items-center rounded-lg border border-slate-300 bg-slate-100 px-3 text-sm font-medium text-slate-700" title="Nomor asli dialokasikan secara atomik oleh Supabase saat Draft dibuat">Nomor PO otomatis</div>
                 <select className={inp} value={vendorId} onChange={e=>setVendorId(e.target.value)}><option value="">Pilih vendor</option>{vendors.map(v=><option key={v.id} value={v.id}>{v.vendor_name}</option>)}</select>
@@ -185,13 +371,78 @@ export default function ProductionOrdersPage() {
                 <button className={btn} disabled={busy||!vendorId||!poDate} onClick={()=>void run("Buat PO Draft otomatis",async()=>{const id=await call("wms_po_create_auto",{p_vendor_id:vendorId,p_order_date:poDate,p_eta_date:poEta||null,p_notes:null});setSelected(String(id));})}>Buat Draft</button>
               </div>
               <p className="text-xs text-slate-500">Nomor akan dibuat setelah klik Buat Draft, contoh PO-20261101-001. Nomor unik per tanggal, tidak dipakai ulang. PO historis tetap memakai nomor lama.</p>
+            </div></details></section>
+<section className="min-w-0 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h2 className="text-lg font-bold text-slate-900">Daftar Purchase Order</h2>
+                  <p className="text-sm text-slate-500">{money(filteredPo.length)} PO ditemukan. Klik Lihat Detail untuk membuka satu pesanan.</p></div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600"><span>Final dipesan: <b>{money(sumOrdered)} pcs</b></span></div>
+              </div>
+              <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
+                <input className={inp} aria-label="Cari nomor PO atau vendor" placeholder="Cari nomor PO / nama vendor..." value={poSearch} onChange={e=>{setPoSearch(e.target.value);setPoPage(1);}} />
+                <select className={inp} aria-label="Filter status PO" value={poStatusFilter} onChange={e=>{setPoStatusFilter(e.target.value);setPoPage(1);}}>
+                  <option value="ALL">Semua Status</option><option value="FINAL">Final</option><option value="DRAFT">Draft</option><option value="CLOSED">Selesai</option><option value="CANCELLED">Dibatalkan</option>
+                </select>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[740px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600"><tr>
+                    <th className="px-4 py-3">No. PO / Tanggal</th><th className="px-4 py-3">Vendor</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Belum Datang</th><th className="px-4 py-3 text-right">Detail</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                  {visiblePo.map(o=>{
+                    const remaining=lines.filter(l=>l.po_id===o.id).reduce((a,l)=>a+l.remaining_qty,0);
+                    return <tr key={o.id} className={selected===o.id?"bg-blue-50":"hover:bg-slate-50"}>
+                      <td className="px-4 py-3"><div className="font-bold text-slate-900">{o.po_number}</div><div className="mt-0.5 text-xs text-slate-500">{o.order_date}</div></td>
+                      <td className="px-4 py-3 font-medium text-slate-700">{poVendorName(o.vendor_id)}</td>
+                      <td className="px-4 py-3"><span className={o.status==="FINAL"?"rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800":o.status==="DRAFT"?"rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800":"rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600"}>{display(o.status)}</span></td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{money(remaining)} pcs</td>
+                      <td className="px-4 py-3 text-right"><button type="button" className={soft} onClick={()=>selectPoAndScroll(o.id)} aria-label={"Lihat detail PO "+o.po_number}>Lihat Detail</button></td>
+                    </tr>;
+                  })}
+                  {visiblePo.length===0&&<tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">PO tidak ditemukan. Coba ubah filter atau kata pencarian.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+                <span>Halaman {poPageSafe} dari {poPageCount}  |  {filteredPo.length} PO</span>
+                <div className="flex gap-2"><button className={soft} disabled={poPageSafe<=1} onClick={()=>setPoPage(p=>Math.max(1,p-1))}>Sebelumnya</button><button className={soft} disabled={poPageSafe>=poPageCount} onClick={()=>setPoPage(p=>Math.min(poPageCount,p+1))}>Berikutnya</button></div>
+              </div>
             </section>
-            <section className="space-y-3 rounded-xl border bg-white p-4"><h2 className="text-lg font-bold">Daftar PO</h2><p className="text-xs text-slate-500">Qty Final dipesan: {money(sumOrdered)} pcs. Pilih PO untuk melihat item, progres, dan penerimaan.</p>
-              <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">Nomor PO</th><th className="p-2">Tanggal</th><th className="p-2">Vendor</th><th className="p-2">Status</th><th className="p-2">Belum Datang</th></tr></thead><tbody>{orders.map(o=><tr key={o.id} className={`cursor-pointer border-b ${selected===o.id?"bg-blue-50":"hover:bg-slate-50"}`} onClick={()=>setSelected(o.id)}><td className="p-2 font-semibold">{o.po_number}</td><td className="p-2">{o.order_date}</td><td className="p-2">{vendors.find(v=>v.id===o.vendor_id)?.vendor_name||"—"}</td><td className="p-2">{o.status}</td><td className="p-2">{money(lines.filter(l=>l.po_id===o.id).reduce((a,x)=>a+x.remaining_qty,0))} pcs</td></tr>)}</tbody></table></div>
-            </section>
-            {selectedOrder && <section className="space-y-3 rounded-xl border bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></div>
+            {selectedOrder && <section id="po-detail" className="min-w-0 scroll-mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap items-start gap-2">{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>setShowPoPreview(v=>!v)}>{showPoPreview?"Tutup Preview":"Preview Vendor"}</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={btn} onClick={()=>void downloadPoQuantityPdf()}>Download PDF Qty</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>void downloadPoQuantityExcel()}>Download Excel Qty</button>}<details className="rounded-xl border border-slate-200 p-2"><summary className="cursor-pointer px-2 text-sm font-semibold text-slate-700">Tindakan Admin</summary><div className="mt-3 flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></details></div></div>
+<div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+                <b>Vendor:</b> {poVendorName(selectedOrder.vendor_id)} <span className="mx-2 text-slate-300">|</span> <b>Tanggal:</b> {selectedOrder.order_date}
+                <span className="mx-2 text-slate-300">|</span><b>ETA:</b> {selectedOrder.eta_date||"Belum ditetapkan"}
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                {[["Item SKU",selectedLines.length],["Qty Dipesan",selectedOrdered],["Diterima",selectedReceived],["Belum Datang",selectedRemaining]].map(([label,value])=><div key={String(label)} className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(Number(value))}</p></div>)}
+              </div>
+              {selectedOrder.status==="FINAL"&&<p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">PDF rincian qty belum memuat harga vendor terverifikasi. Jangan kirim sebagai PO komersial tanpa lampiran penawaran harga yang telah disetujui.</p>}
+              {selectedOrder.status==="FINAL"&&showPoPreview&&<div className="space-y-4 rounded-xl border-2 border-slate-300 bg-white p-4 md:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4"><div><p className="text-xl font-extrabold text-slate-900">Hi.PRIMA</p><p className="text-xs text-slate-500">PT Prima Berkah Mulia</p></div><div className="text-right"><p className="text-base font-bold">RINCIAN ORDER PRODUKSI</p><p className="text-xs text-slate-500">FINAL - kuantitas saja</p></div></div>
+                <div className="grid gap-2 text-sm md:grid-cols-2"><p><b>Nomor PO:</b> {selectedOrder.po_number}</p><p><b>Vendor:</b> {poVendorName(selectedOrder.vendor_id)}</p><p><b>Tanggal:</b> {selectedOrder.order_date}</p><p><b>ETA:</b> {selectedOrder.eta_date||"Belum ditentukan"}</p></div>
+                <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[440px] text-left text-sm"><thead className="bg-slate-50"><tr><th className="p-3">SKU</th><th className="p-3">Produk</th><th className="p-3 text-right">Qty</th></tr></thead><tbody className="divide-y divide-slate-100">{selectedLines.map(l=><tr key={l.id}><td className="p-3 font-semibold">{l.source_sku}</td><td className="p-3">{l.source_product_name||"-"}</td><td className="p-3 text-right font-semibold">{money(l.ordered_qty)}</td></tr>)}</tbody><tfoot className="bg-slate-50"><tr><td colSpan={2} className="p-3 font-bold">TOTAL</td><td className="p-3 text-right font-bold">{money(selectedOrdered)} pcs</td></tr></tfoot></table></div>
+                <p className="text-xs text-amber-900">Belum memuat harga yang disetujui. Untuk dikirim ke vendor, lampirkan penawaran harga resmi yang telah diverifikasi.</p>
+                <button className={btn} type="button" onClick={()=>void downloadPoQuantityPdf()}>Download PDF Rincian Qty</button><button className={soft} type="button" onClick={()=>void downloadPoQuantityExcel()}>Download Excel Rincian Qty</button>
+              </div>}
               {selectedOrder.status==="DRAFT"&&<div className="space-y-2 rounded-lg bg-slate-50 p-3"><b className="text-sm">Tambah SKU ke PO</b><div className="grid min-w-0 gap-2 md:grid-cols-5"><input className={inp} value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}} placeholder="Cari SKU master"/><button className={soft} onClick={()=>void lookupSku()}>Cari SKU</button><select className={inp} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih hasil</option>{variantMatches.map(v=><option value={v.id} key={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><input className={inp} type="number" min="1" placeholder="Qty PO" value={qty} onChange={e=>setQty(e.target.value)}/><button className={btn} disabled={busy||!variantId||!(Number(qty)>0)} onClick={()=>void run("Tambah SKU",async()=>{await call("wms_po_add_line",{p_po_id:selected,p_variant_id:variantId,p_qty:Number(qty)});setQty("");setSku("");setVariantId("");setVariantMatches([]);setSkuSearchMessage("");})}>Tambah</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
-              <div className="overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead><tr className="border-b bg-slate-100"><th className="p-2">SKU / Produk</th><th className="p-2">Qty PO</th><th className="p-2">Diterima</th><th className="p-2">Belum Datang</th><th className="p-2">Progres Vendor</th><th className="p-2">Status</th><th className="p-2">Tindakan</th></tr></thead><tbody>{selectedLines.map(l=><tr key={l.id} className="border-b align-top"><td className="p-2"><b>{l.source_sku}</b><p className="text-xs text-slate-500">{l.source_product_name}</p>{l.verified_vendor_lifecycle&&<p className="text-xs font-semibold text-slate-600">Lifecycle Produk: {lifecycleLabel(l.verified_vendor_lifecycle)}</p>}{!l.variant_id&&<span className="text-xs font-bold text-red-700">Belum mapping Master</span>}</td><td className="p-2">{l.ordered_qty}</td><td className="p-2">{l.received_qty}</td><td className="p-2 font-bold">{l.remaining_qty}</td><td className="p-2">{display(l.progress)}</td><td className="p-2">{display(l.tracking_status)}</td><td className="space-y-1 p-2">
+
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><h3 className="font-bold text-slate-900">Detail SKU per Produk</h3>
+                    <p className="text-xs text-slate-500">{filteredPoLines.length} dari {selectedLines.length} SKU ditampilkan. Urut berdasarkan nama produk.</p></div>
+                  <button type="button" className={soft} onClick={()=>{setPoSkuQuery("");setPoProductFilter("ALL");setPoSkuPage(1);}}>Reset Filter</button>
+                </div>
+                <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(190px,320px)]">
+                  <input className={inp} aria-label="Cari SKU pada PO ini" placeholder="Cari SKU, produk, atau status..." value={poSkuQuery} onChange={e=>{setPoSkuQuery(e.target.value);setPoSkuPage(1);}} />
+                  <select className={inp} aria-label="Filter kelompok produk" value={poProductFilter} onChange={e=>{setPoProductFilter(e.target.value);setPoSkuPage(1);}}>
+                    <option value="ALL">Semua Produk ({selectedLines.length} SKU)</option>
+                    {poProducts.map(name=><option key={name} value={name}>{name} ({selectedLines.filter(l=>poProductName(l)===name).length} SKU)</option>)}
+                  </select>
+                </div>
+              </div>
+
+<div className="overflow-x-auto"><table className="w-full min-w-[940px] text-left text-sm"><thead><tr className="border-b bg-slate-50 text-xs font-semibold text-slate-700"><th className="p-2">SKU / Produk</th><th className="p-2">Qty PO</th><th className="p-2">Diterima</th><th className="p-2">Belum Datang</th><th className="p-2">Progres Vendor</th><th className="p-2">Status</th><th className="p-2">Tindakan</th></tr></thead><tbody>{visiblePoLines.length===0&&<tr><td colSpan={7} className="p-6 text-center text-sm text-slate-500">SKU tidak ditemukan. Coba ubah pencarian atau filter produk.</td></tr>}{visiblePoLines.map(l=><tr key={l.id} className="border-b border-slate-100 align-top hover:bg-slate-50"><td className="p-2"><b>{l.source_sku}</b><p className="text-xs text-slate-500">{l.source_product_name}</p>{l.verified_vendor_lifecycle&&<p className="text-xs font-semibold text-slate-600">Lifecycle Produk: {lifecycleLabel(l.verified_vendor_lifecycle)}</p>}{!l.variant_id&&<span className="text-xs font-bold text-red-700">Belum mapping Master</span>}</td><td className="p-2">{l.ordered_qty}</td><td className="p-2">{l.received_qty}</td><td className="p-2 font-bold">{l.remaining_qty}</td><td className="p-2">{display(l.progress)}</td><td className="p-2">{display(l.tracking_status)}</td><td className="p-2"><details className="rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-800">Kelola Item</summary><div className="flex min-w-[220px] flex-col items-start gap-2 border-t border-slate-100 p-3">
                 <select className={soft} disabled={busy||!['DRAFT','FINAL'].includes(l.po_status)} value={l.progress} onChange={e=>void run("Update progres",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:e.target.value,p_eta_date:null});})}><option value="UNCONFIRMED">Belum Dikonfirmasi</option><option value="IN_PRODUCTION">Dalam Produksi</option><option value="READY_AT_VENDOR">Ready at Vendor</option><option value="IN_TRANSIT">Dalam Pengiriman</option></select>
                 {l.po_status==="DRAFT" && <button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Qty PO untuk "+l.source_sku+" (angka positif):",String(l.ordered_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>0)void run("Update Qty PO",async()=>{await call("wms_po_set_draft_qty",{p_line_id:l.id,p_qty:Number(value)});});}}>Ubah Qty PO</button>}
                 {owner && (l.po_status==="DRAFT"||l.po_status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Total qty DIBATALKAN (bukan tambahan), maksimum "+(l.ordered_qty-l.received_qty)+" pcs:",String(l.cancelled_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>=0)void run("Update pembatalan",async()=>{await call("wms_po_cancel_qty",{p_line_id:l.id,p_cancel_qty:Number(value)});});}}>Qty Batal</button>}
@@ -206,7 +457,14 @@ export default function ProductionOrdersPage() {
                 {l.po_status==="DRAFT"&&owner&&l.verified_vendor_lifecycle==="Seasonal"&&(l.seasonal_approved_at?<span className="text-xs font-semibold text-emerald-700">Seasonal disetujui</span>:<button className={soft} disabled={busy} onClick={()=>void run("Approval Seasonal",async()=>{await call("wms_po_approve_seasonal",{p_line_id:l.id});})}>Approval Seasonal</button>)}
                 {l.po_status==="FINAL"&&l.variant_id&&<button className={soft} disabled={busy} onClick={()=>void run("Cari Inbound",async()=>{const a=await call("wms_po_inbound_candidates",{p_line_id:l.id});setCandidates(x=>({...x,[l.id]:(a||[]) as Candidate[]}));})}>Cari Inbound</button>}
                 {candidates[l.id] && <div className="flex gap-2"><select className={soft} value={receiptChoice[l.id]||""} onChange={e=>setReceiptChoice(x=>({...x,[l.id]:e.target.value}))}><option value="">Pilih inbound diposting</option>{candidates[l.id].map(c=><option key={c.movement_id} value={c.movement_id}>#{c.movement_no} · {c.quantity} pcs</option>)}</select><button className={btn} disabled={busy||!receiptChoice[l.id]} onClick={()=>void run("Tautkan inbound",async()=>{await call("wms_po_link_inbound",{p_line_id:l.id,p_movement_id:receiptChoice[l.id]});setCandidates(x=>{const next={...x};delete next[l.id];return next;});})}>Tautkan</button></div>}
-              </td></tr>)}</tbody></table></div>
+              </div></details></td></tr>)}</tbody></table></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+                <span>Menampilkan {visiblePoLines.length===0?0:(skuPageSafe-1)*skuPageSize+1} - {Math.min(skuPageSafe*skuPageSize,filteredPoLines.length)} dari {filteredPoLines.length} SKU | Halaman {skuPageSafe}/{skuPageCount}</span>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={soft} disabled={skuPageSafe<=1} onClick={()=>setPoSkuPage(p=>Math.max(1,p-1))}>Sebelumnya</button>
+                  <button type="button" className={soft} disabled={skuPageSafe>=skuPageCount} onClick={()=>setPoSkuPage(p=>Math.min(skuPageCount,p+1))}>Berikutnya</button>
+                </div>
+              </div>
               {mapLineId && selectedLines.some(l=>l.id===mapLineId) && <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3"><b>Mapping SKU ke Master</b><div className="flex min-w-0 flex-wrap gap-2"><input className="min-w-[180px] max-w-full flex-1 rounded-lg border p-2" value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}}/><button className={soft} onClick={()=>void lookupSku()}>Cari Master SKU</button><select className={soft} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih SKU valid</option>{variantMatches.map(v=><option key={v.id} value={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><button className={btn} disabled={!variantId||busy} onClick={()=>void run("Simpan mapping",async()=>{await call("wms_po_map_line",{p_line_id:mapLineId,p_variant_id:variantId});setMapLineId("");setVariantId("");setSku("");setVariantMatches([]);setSkuSearchMessage("");})}>Simpan</button><button className={soft} onClick={()=>setMapLineId("")}>Batal</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
               <p className="text-xs text-slate-500">Saat barang tiba: posting di Inbound WMS dengan <b>Referensi = {selectedOrder.po_number}</b> dan SKU yang sesuai; setelah itu klik Cari Inbound → Tautkan. Stok hanya bertambah sekali, dari transaksi Inbound.</p>
             </section>}
