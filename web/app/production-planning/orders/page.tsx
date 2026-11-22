@@ -15,6 +15,19 @@ const money = (n: number) => new Intl.NumberFormat("id-ID").format(Number(n || 0
 const display = (s: string) => ({UNCONFIRMED:"Belum Dikonfirmasi",IN_PRODUCTION:"Dalam Produksi",READY_AT_VENDOR:"Ready at Vendor",IN_TRANSIT:"Dalam Pengiriman",PARTIAL_RECEIVED:"Diterima Sebagian",SUDAH_DITERIMA:"Selesai Diterima",SKU_BELUM_MAPPING:"SKU Belum Mapping",DRAFT_BELUM_FINAL:"Draft Belum Final"} as Record<string,string>)[s] || s;
 const nowDate = () => new Date().toLocaleDateString("en-CA", {timeZone:"Asia/Jakarta"});
 
+
+// HIPRIMA_PO_COMMERCIAL_V43H: Data ini hanya untuk dokumen vendor; jangan ekspor HPP internal.
+type VerifiedCommercialLine = {
+  id:string; sku:string; product:string; qty:number; price:number; subtotal:number;
+};
+type VerifiedCommercialPo = {
+  poId:string; number:string; vendor:string; date:string; eta:string;
+  approverRole:string; approvalDate:string; lines:VerifiedCommercialLine[];
+  totalQty:number; totalAmount:number;
+};
+const officialAmount=(value:number)=>new Intl.NumberFormat("id-ID",{minimumFractionDigits:0,maximumFractionDigits:2}).format(value);
+const officialSameMoney=(a:unknown,b:unknown)=>Math.round(Number(a)*100)===Math.round(Number(b)*100);
+
 export default function ProductionOrdersPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -54,6 +67,11 @@ export default function ProductionOrdersPage() {
   const [poSkuQuery,setPoSkuQuery]=useState("");
   const [poProductFilter,setPoProductFilter]=useState("ALL");
   const [poSkuPage,setPoSkuPage]=useState(1);
+
+
+  const [verifiedPo,setVerifiedPo]=useState<VerifiedCommercialPo|null>(null);
+  const [verifiedPoBusy,setVerifiedPoBusy]=useState(false);
+  const [verifiedPoMessage,setVerifiedPoMessage]=useState("");
 
   const [showPoPreview,setShowPoPreview]=useState(false);
   const [bulkConfirmed,setBulkConfirmed]=useState(false);
@@ -297,6 +315,229 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
     }catch(e){setError("Gagal membuat Excel: "+(e instanceof Error?e.message:String(e)));}
   }
 
+
+  // Data selalu diambil ulang ketika dokumen RESMI akan diunduh.
+  useEffect(()=>{setVerifiedPo(null);setVerifiedPoMessage("");},[selected]);
+
+  async function checkAndReadOfficialPo():Promise<VerifiedCommercialPo>{
+    if(!owner)throw new Error("Hanya Owner/Admin boleh melihat atau mengekspor harga PO resmi.");
+    const po=selectedOrder;
+    if(!po||po.status!=="FINAL")throw new Error("PO resmi hanya dapat dibuat dari PO berstatus FINAL.");
+    if(!po.eta_date)throw new Error("ETA PO belum ditetapkan. Lengkapi jadwal resmi sebelum ekspor komersial.");
+    if(!selectedLines.length)throw new Error("Tidak ada detail SKU pada PO ini.");
+    if(selectedLines.some(l=>Number(l.cancelled_qty)>0))throw new Error("PO memiliki pembatalan Qty; membutuhkan revisi/amendemen sebelum ekspor PO resmi.");
+    if(selectedLines.some(l=>!l.variant_id||!Number.isInteger(Number(l.ordered_qty))||Number(l.ordered_qty)<=0)){
+      throw new Error("Ada SKU/Qty belum valid; PO resmi diblokir.");
+    }
+    const {data:orderLinks,error:olError}=await supabase.from("wms_production_po_conversion_orders")
+      .select("id,conversion_id,vendor_id,po_id").eq("po_id",po.id).limit(2);
+    if(olError)throw new Error("Tidak dapat membaca bukti konversi PO: "+olError.message);
+    if(!orderLinks||orderLinks.length!==1)throw new Error("PO lama/manual tanpa bukti konversi approval operasional. Gunakan PDF/Excel Qty; jangan menerbitkan harga komersial otomatis.");
+    const link=orderLinks[0];
+    if(link.vendor_id!==po.vendor_id)throw new Error("Vendor PO berbeda dengan vendor yang disetujui.");
+    const {data:conversion,error:coError}=await supabase.from("wms_production_po_conversions")
+      .select("id,operational_approval_id,source_batch_id,status,created_at")
+      .eq("id",link.conversion_id).single();
+    if(coError||!conversion)throw new Error("Bukti konversi tidak dapat diverifikasi.");
+    if(conversion.status!=="COMPLETED")throw new Error("Konversi ke PO belum COMPLETED.");
+    const {data:approval,error:apError}=await supabase.from("wms_production_operational_approvals")
+      .select("id,status,decided_by,decided_role,decided_at")
+      .eq("id",conversion.operational_approval_id).single();
+    if(apError||!approval||approval.status!=="APPROVED"||!approval.decided_by||!approval.decided_at||
+       !["owner","admin"].includes(String(approval.decided_role||"").toLowerCase())){
+      throw new Error("Persetujuan Owner/Admin belum dapat dibuktikan.");
+    }
+    if(new Date(conversion.created_at).getTime()<new Date(approval.decided_at).getTime()){
+      throw new Error("Urutan waktu approval dan pembuatan PO tidak valid.");
+    }
+    const {data:conversionLines,error:clError}=await supabase.from("wms_production_po_conversion_lines")
+      .select("po_line_id,source_review_line_id,quote_id,vendor_unit_price_snapshot,currency_snapshot,ordered_qty_snapshot")
+      .eq("conversion_order_id",link.id).limit(10000);
+    if(clError)throw new Error("Gagal membaca snapshot harga PO: "+clError.message);
+    if(!conversionLines||conversionLines.length!==selectedLines.length){
+      throw new Error("Jumlah item PO tidak cocok dengan bukti snapshot; ekspor diblokir.");
+    }
+    const {data:approvedLines,error:alError}=await supabase.from("wms_production_operational_approval_lines")
+      .select("source_review_line_id,vendor_id,variant_id,quote_id,proposed_qty,vendor_unit_price_snapshot,currency_snapshot")
+      .eq("approval_id",approval.id).limit(10000);
+    if(alError)throw new Error("Tidak dapat membaca detail approval: "+alError.message);
+    if(!approvedLines||approvedLines.length!==conversionLines.length){
+      throw new Error("Detail approval tidak lengkap dibanding baris PO.");
+    }
+    const quoteIds=Array.from(new Set(conversionLines.map(l=>String(l.quote_id||"")).filter(Boolean)));
+    if(quoteIds.length===0||conversionLines.some(l=>!l.quote_id)){
+      throw new Error("Ada harga default dari HPP Master atau harga tanpa quote terverifikasi. PO komersial tidak boleh dibuat otomatis.");
+    }
+    const {data:quotes,error:qError}=await supabase.from("wms_vendor_variant_quotes")
+      .select("id,vendor_id,variant_id,unit_price,currency,status,verified_by,verified_at,created_by,scope_batch_id")
+      .in("id",quoteIds).limit(10000);
+    if(qError)throw new Error("Gagal memverifikasi penawaran vendor: "+qError.message);
+    const quoteMap=new Map((quotes||[]).map(q=>[q.id,q]));
+    const approvedMap=new Map(approvedLines.map(a=>[a.source_review_line_id,a]));
+    const poLineMap=new Map(selectedLines.map(l=>[l.id,l]));
+    const seenIds=new Set<string>();
+    const result:VerifiedCommercialLine[]=[];
+    for(const cl of conversionLines){
+      if(seenIds.has(cl.po_line_id))throw new Error("Baris PO duplikat dalam conversion.");
+      seenIds.add(cl.po_line_id);
+      const l=poLineMap.get(cl.po_line_id);
+      const al=approvedMap.get(cl.source_review_line_id);
+      const q=quoteMap.get(cl.quote_id);
+      if(!l||!al||!q)throw new Error("Pemetaan item PO / approval / penawaran tidak lengkap.");
+      if(al.vendor_id!==po.vendor_id||al.variant_id!==l.variant_id||
+        al.quote_id!==cl.quote_id||q.vendor_id!==po.vendor_id||q.variant_id!==l.variant_id){
+        throw new Error("Identitas vendor, varian atau quote tidak sama dengan approval.");
+      }
+      if(q.scope_batch_id&&q.scope_batch_id!==conversion.source_batch_id){
+        throw new Error("Penawaran ini hanya berlaku untuk batch lain.");
+      }
+      if(q.status!=="VERIFIED"||!q.verified_by||!q.verified_at||q.verified_by===q.created_by){
+        throw new Error("Harga vendor belum diverifikasi secara independen.");
+      }
+      if(new Date(q.verified_at).getTime()>new Date(approval.decided_at).getTime()){
+        throw new Error("Harga vendor diverifikasi setelah approval; dokumen tidak valid.");
+      }
+      const qty=Number(cl.ordered_qty_snapshot);
+      const price=Number(cl.vendor_unit_price_snapshot);
+      if(!Number.isInteger(qty)||qty<=0||!Number.isFinite(price)||price<=0||
+         qty!==Number(l.ordered_qty)||qty!==Number(al.proposed_qty)||
+         cl.currency_snapshot!=="IDR"||al.currency_snapshot!=="IDR"||q.currency!=="IDR"||
+         !officialSameMoney(price,al.vendor_unit_price_snapshot)||!officialSameMoney(price,q.unit_price)){
+        throw new Error("Qty, snapshot harga atau mata uang berbeda; ekspor PO resmi dihentikan.");
+      }
+      if(!l.source_sku||!l.source_product_name)throw new Error("Identitas SKU/produk tidak lengkap.");
+      result.push({id:l.id,sku:l.source_sku,product:l.source_product_name,
+        qty,price,subtotal:Math.round(qty*price*100)/100});
+    }
+    result.sort((a,b)=>a.product.localeCompare(b.product,"id")||a.sku.localeCompare(b.sku,"id"));
+    const totalQty=result.reduce((n,l)=>n+l.qty,0);
+    const totalAmount=Math.round(result.reduce((n,l)=>n+l.subtotal,0)*100)/100;
+    if(totalQty!==selectedOrdered||result.length!==selectedLines.length){
+      throw new Error("Total dokumen tidak cocok dengan PO.");
+    }
+    return {poId:po.id,number:po.po_number,vendor:poVendorName(po.vendor_id),date:po.order_date,
+      eta:po.eta_date,approverRole:String(approval.decided_role).toUpperCase(),
+      approvalDate:String(approval.decided_at),lines:result,totalQty,totalAmount};
+  }
+
+  async function showOfficialPoPreview(){
+    setVerifiedPoBusy(true);setVerifiedPoMessage("");setVerifiedPo(null);
+    try{const doc=await checkAndReadOfficialPo();setVerifiedPo(doc);
+      setVerifiedPoMessage("VERIFIED: Harga vendor, persetujuan, dan seluruh item PO cocok. Dokumen siap ditinjau.");
+    }catch(e){setVerifiedPoMessage("BELUM SIAP: "+(e instanceof Error?e.message:String(e)));}
+    finally{setVerifiedPoBusy(false);}
+  }
+
+  async function exportOfficialPo(format:"pdf"|"xlsx"){
+    setVerifiedPoBusy(true);setVerifiedPoMessage("");
+    try{
+      const doc=await checkAndReadOfficialPo();
+      setVerifiedPo(doc);
+      if(!window.confirm("PO RESMI "+doc.number+" untuk "+doc.vendor+". Qty "+officialAmount(doc.totalQty)+
+        " pcs; nilai Rp "+officialAmount(doc.totalAmount)+". Pastikan akan dikirim ke vendor yang benar. Download?"))return;
+      const safe=(s:string)=>s.replace(/[^A-Za-z0-9_-]+/g,"-").slice(0,60);
+      const filename="PO-RESMI-"+safe(doc.number)+"-"+safe(doc.vendor);
+      if(format==="xlsx"){
+        const {Workbook}=await import("exceljs");
+        const wb=new Workbook();wb.creator="Hi.PRIMA WMS";
+        wb.subject="Purchase Order resmi dari approval dan penawaran vendor terverifikasi";
+        const ws=wb.addWorksheet("PO Resmi",{views:[{state:"frozen",ySplit:9}]});
+        ws.columns=[{key:"no",width:7},{key:"sku",width:28},{key:"product",width:40},
+          {key:"qty",width:14},{key:"price",width:22},{key:"subtotal",width:26}];
+        ws.mergeCells("A1:F1");ws.getCell("A1").value="Hi.PRIMA | PT Prima Berkah Mulia";
+        ws.getCell("A1").font={bold:true,size:16,color:{argb:"FF0F172A"}};ws.getRow(1).height=28;
+        ws.mergeCells("A2:F2");ws.getCell("A2").value="PURCHASE ORDER RESMI - HARGA VENDOR TERVERIFIKASI";
+        ws.getCell("A2").font={bold:true,size:12};
+        ws.getCell("A3").value="Nomor PO";ws.getCell("B3").value=doc.number;
+        ws.getCell("D3").value="Vendor";ws.getCell("E3").value=doc.vendor;
+        ws.getCell("A4").value="Tanggal";ws.getCell("B4").value=doc.date;
+        ws.getCell("D4").value="ETA";ws.getCell("E4").value=doc.eta;
+        ws.getCell("A5").value="Disetujui";ws.getCell("B5").value=doc.approverRole;
+        ws.getCell("D5").value="Waktu";ws.getCell("E5").value=doc.approvalDate;
+        ws.mergeCells("A7:F7");ws.getCell("A7").value="Dokumen bersumber dari snapshot approval WMS; tidak memuat HPP/margin internal.";
+        ws.getCell("A7").font={italic:true,color:{argb:"FF475569"}};
+        const hdr=ws.getRow(9);hdr.values=["No","SKU / Varian","Nama Produk","Qty PO","Harga Vendor (Rp)","Subtotal (Rp)"];
+        hdr.font={bold:true,color:{argb:"FFFFFFFF"}};
+        hdr.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF172554"}};
+        hdr.alignment={vertical:"middle"};hdr.height=24;
+        ws.autoFilter={from:"A9",to:"F9"};
+        doc.lines.forEach((l,i)=>{
+          const row=ws.addRow([i+1,l.sku,l.product,l.qty,l.price,l.subtotal]);
+          row.height=22;row.alignment={vertical:"middle",wrapText:true};
+          row.getCell(4).numFmt="#,##0";
+          row.getCell(5).numFmt='"Rp" #,##0.00';row.getCell(6).numFmt='"Rp" #,##0.00';
+          if(i%2)row.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+        });
+        const tr=ws.addRow(["","","TOTAL",doc.totalQty,"",doc.totalAmount]);
+        tr.font={bold:true};tr.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFDEE7F2"}};
+        tr.getCell(6).numFmt='"Rp" #,##0.00';
+        ws.pageSetup={paperSize:9,orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0};
+        const bytes=await wb.xlsx.writeBuffer();
+        const blob=new Blob([bytes as unknown as BlobPart],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+        const href=URL.createObjectURL(blob);const a=document.createElement("a");
+        a.href=href;a.download=filename+".xlsx";document.body.appendChild(a);a.click();a.remove();
+        window.setTimeout(()=>URL.revokeObjectURL(href),1500);
+      }else{
+        const {jsPDF}=await import("jspdf");
+        const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+        const L=14,R=196;let y=12;
+        const moneyText=(n:number)=>"Rp "+officialAmount(n);
+        function footer(){
+          pdf.setDrawColor(203,213,225);pdf.line(L,281,R,281);
+          pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(100,116,139);
+          pdf.text("PO resmi dari approval WMS - harga sesuai quote vendor terverifikasi",L,286);
+          pdf.text("Hal. "+pdf.getNumberOfPages(),R,286,{align:"right"});
+        }
+        function head(continuation:boolean){
+          pdf.setFillColor(15,23,42);pdf.rect(0,0,210,10,"F");
+          pdf.setFont("helvetica","bold");pdf.setTextColor(15,23,42);pdf.setFontSize(15);
+          pdf.text("Hi.PRIMA",L,22);pdf.setFontSize(11);
+          pdf.text(continuation?"PURCHASE ORDER (LANJUTAN)":"PURCHASE ORDER RESMI",R,22,{align:"right"});
+          pdf.setFont("helvetica","normal");pdf.setFontSize(8);pdf.setTextColor(71,85,105);
+          pdf.text("PT Prima Berkah Mulia",L,28);pdf.text("Status: FINAL / APPROVED",R,28,{align:"right"});
+          y=37;
+          if(!continuation){
+            pdf.setTextColor(30,41,59);pdf.setFontSize(9);
+            const fields=[["Nomor PO",doc.number],["Vendor",doc.vendor],["Tanggal",doc.date],
+              ["ETA",doc.eta],["Approval",doc.approverRole+" - "+doc.approvalDate]];
+            fields.forEach(([k,v])=>{pdf.text(k,L,y);pdf.text(": "+String(v),L+28,y);y+=6;});
+            y+=2;
+          }
+          pdf.setFillColor(241,245,249);pdf.rect(L,y,R-L,9,"F");
+          pdf.setFont("helvetica","bold");pdf.setTextColor(30,41,59);pdf.setFontSize(8);
+          pdf.text("NO",L+2,y+6);pdf.text("SKU",L+14,y+6);pdf.text("PRODUK",L+55,y+6);
+          pdf.text("QTY",L+121,y+6,{align:"right"});
+          pdf.text("HARGA",L+149,y+6,{align:"right"});
+          pdf.text("SUBTOTAL",R-2,y+6,{align:"right"});y+=10;
+        }
+        head(false);
+        doc.lines.forEach((l,i)=>{
+          const sku=pdf.splitTextToSize(l.sku,38);
+          const name=pdf.splitTextToSize(l.product,57);
+          const h=Math.max(10,Math.max(sku.length,name.length)*4+5);
+          if(y+h>267){footer();pdf.addPage();head(true);}
+          if(i%2){pdf.setFillColor(248,250,252);pdf.rect(L,y,R-L,h,"F");}
+          pdf.setTextColor(30,41,59);pdf.setFont("helvetica","normal");pdf.setFontSize(8);
+          pdf.text(String(i+1),L+2,y+6);pdf.text(sku,L+14,y+6);pdf.text(name,L+55,y+6);
+          pdf.text(String(l.qty),L+121,y+6,{align:"right"});
+          pdf.text(officialAmount(l.price),L+149,y+6,{align:"right"});
+          pdf.setFont("helvetica","bold");pdf.text(officialAmount(l.subtotal),R-2,y+6,{align:"right"});
+          y+=h;
+        });
+        if(y+29>267){footer();pdf.addPage();head(true);}
+        pdf.setDrawColor(148,163,184);pdf.line(L,y+2,R,y+2);
+        pdf.setTextColor(15,23,42);pdf.setFont("helvetica","bold");pdf.setFontSize(10);
+        pdf.text("TOTAL "+doc.totalQty+" PCS",L+2,y+11);
+        pdf.text(moneyText(doc.totalAmount),R-2,y+11,{align:"right"});
+        pdf.setFont("helvetica","normal");pdf.setFontSize(8);pdf.setTextColor(71,85,105);
+        pdf.text("Ketentuan tambahan sesuai kesepakatan tertulis dengan vendor.",L,y+20);
+        footer();pdf.save(filename+".pdf");
+      }
+      setVerifiedPoMessage("DOWNLOAD SIAP: "+filename+"."+format+". Dokumen berasal dari snapshot harga yang sudah disetujui.");
+    }catch(e){setVerifiedPoMessage("GAGAL / BELUM SIAP: "+(e instanceof Error?e.message:String(e)));}
+    finally{setVerifiedPoBusy(false);}
+  }
+
   const groups=useMemo(()=> {
     const map=new Map<string,{key:string;vendor:string;date:string;rows:number;qty:number;ready:number;imported:number}>();
     for(const x of initial){const key=x.vendor_raw+"|"+x.source_date;
@@ -409,7 +650,7 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
                 <div className="flex gap-2"><button className={soft} disabled={poPageSafe<=1} onClick={()=>setPoPage(p=>Math.max(1,p-1))}>Sebelumnya</button><button className={soft} disabled={poPageSafe>=poPageCount} onClick={()=>setPoPage(p=>Math.min(poPageCount,p+1))}>Berikutnya</button></div>
               </div>
             </section>
-            {selectedOrder && <section id="po-detail" className="min-w-0 scroll-mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap items-start gap-2">{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>setShowPoPreview(v=>!v)}>{showPoPreview?"Tutup Preview":"Preview Vendor"}</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={btn} onClick={()=>void downloadPoQuantityPdf()}>Download PDF Qty</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>void downloadPoQuantityExcel()}>Download Excel Qty</button>}<details className="rounded-xl border border-slate-200 p-2"><summary className="cursor-pointer px-2 text-sm font-semibold text-slate-700">Tindakan Admin</summary><div className="mt-3 flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></details></div></div>
+            {selectedOrder && <section id="po-detail" className="min-w-0 scroll-mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap items-start gap-2">{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>setShowPoPreview(v=>!v)}>{showPoPreview?"Tutup Preview":"Preview Vendor"}</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={btn} onClick={()=>void downloadPoQuantityPdf()}>PDF Rincian Qty</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>void downloadPoQuantityExcel()}>Excel Rincian Qty</button>}<details className="rounded-xl border border-slate-200 p-2"><summary className="cursor-pointer px-2 text-sm font-semibold text-slate-700">Tindakan Admin</summary><div className="mt-3 flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></details></div></div>
 <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
                 <b>Vendor:</b> {poVendorName(selectedOrder.vendor_id)} <span className="mx-2 text-slate-300">|</span> <b>Tanggal:</b> {selectedOrder.order_date}
                 <span className="mx-2 text-slate-300">|</span><b>ETA:</b> {selectedOrder.eta_date||"Belum ditetapkan"}
@@ -425,6 +666,43 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
                 <p className="text-xs text-amber-900">Belum memuat harga yang disetujui. Untuk dikirim ke vendor, lampirkan penawaran harga resmi yang telah diverifikasi.</p>
                 <button className={btn} type="button" onClick={()=>void downloadPoQuantityPdf()}>Download PDF Rincian Qty</button><button className={soft} type="button" onClick={()=>void downloadPoQuantityExcel()}>Download Excel Rincian Qty</button>
               </div>}
+
+              {selectedOrder.status==="FINAL"&&owner&&<section className="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 md:p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-slate-900">PO Vendor - V4.3H</h3>
+                    <p className="text-xs text-slate-600">Harga hanya dari quote terverifikasi + snapshot PO + approval Owner/Admin. Data read-only.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className={soft} disabled={verifiedPoBusy} onClick={()=>void showOfficialPoPreview()}>
+                      {verifiedPoBusy?"Memeriksa...":"Preview PO Vendor"}
+                    </button>
+                    <button type="button" className={btn} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} onClick={()=>void exportOfficialPo("pdf")}>Download PDF</button>
+                    <button type="button" className={soft} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} onClick={()=>void exportOfficialPo("xlsx")}>Download Excel</button>
+                  </div>
+                </div>
+                {verifiedPoMessage&&<p role="status" className={"rounded-lg px-3 py-2 text-sm "+(verifiedPoMessage.startsWith("VERIFIED")||verifiedPoMessage.startsWith("DOWNLOAD")?"bg-emerald-50 text-emerald-800":"bg-amber-50 text-amber-900")}>{verifiedPoMessage}</p>}
+                {verifiedPo?.poId===selectedOrder.id&&<div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap justify-between gap-3 text-sm">
+                    <span><b>PO {verifiedPo.number}</b> - {verifiedPo.vendor}</span>
+                    <span>Disetujui {verifiedPo.approverRole} | ETA {verifiedPo.eta}</span>
+                  </div>
+                  <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-slate-200">
+                    <table className="min-w-[720px] w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>
+                      <th className="p-2">SKU</th><th className="p-2">Produk</th>
+                      <th className="p-2 text-right">Qty</th><th className="p-2 text-right">Harga Vendor</th><th className="p-2 text-right">Subtotal</th>
+                    </tr></thead><tbody className="divide-y divide-slate-100">
+                      {verifiedPo.lines.map(l=><tr key={l.id}><td className="p-2 font-semibold">{l.sku}</td><td className="p-2">{l.product}</td>
+                        <td className="p-2 text-right">{officialAmount(l.qty)}</td><td className="p-2 text-right">Rp {officialAmount(l.price)}</td>
+                        <td className="p-2 text-right font-semibold">Rp {officialAmount(l.subtotal)}</td></tr>)}
+                    </tbody><tfoot className="bg-slate-50 font-bold"><tr><td colSpan={2} className="p-3">TOTAL PO</td>
+                      <td className="p-3 text-right">{officialAmount(verifiedPo.totalQty)}</td><td></td>
+                      <td className="p-3 text-right">Rp {officialAmount(verifiedPo.totalAmount)}</td></tr></tfoot></table>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Seluruh item termasuk dalam ekspor. Harga HPP/margin internal tidak ditampilkan.</p>
+                </div>}
+              </section>}
+
               {selectedOrder.status==="DRAFT"&&<div className="space-y-2 rounded-lg bg-slate-50 p-3"><b className="text-sm">Tambah SKU ke PO</b><div className="grid min-w-0 gap-2 md:grid-cols-5"><input className={inp} value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}} placeholder="Cari SKU master"/><button className={soft} onClick={()=>void lookupSku()}>Cari SKU</button><select className={inp} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih hasil</option>{variantMatches.map(v=><option value={v.id} key={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><input className={inp} type="number" min="1" placeholder="Qty PO" value={qty} onChange={e=>setQty(e.target.value)}/><button className={btn} disabled={busy||!variantId||!(Number(qty)>0)} onClick={()=>void run("Tambah SKU",async()=>{await call("wms_po_add_line",{p_po_id:selected,p_variant_id:variantId,p_qty:Number(qty)});setQty("");setSku("");setVariantId("");setVariantMatches([]);setSkuSearchMessage("");})}>Tambah</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
 
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:p-4">
