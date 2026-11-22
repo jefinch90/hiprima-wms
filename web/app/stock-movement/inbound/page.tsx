@@ -98,6 +98,13 @@ export default function InboundStockPage() {
   const qtyByQc: Record<QcCode, number> = {NORMAL: normal, DEFECT: defect, REJECT: reject};
   const splitValid = validNumbers && normal >= 0;
   const racksValid = splitValid && codes.every(qc => qtyByQc[qc] === 0 || !!rackIds[qc]);
+  const recommendedNormal =
+    racks.NORMAL.length > 1 &&
+    Number(racks.NORMAL[0]?.current_qty ?? 0) > 0 &&
+    Number(racks.NORMAL[0]?.current_qty ?? 0) >
+      Number(racks.NORMAL[1]?.current_qty ?? 0)
+      ? racks.NORMAL[0]
+      : null;
 
   function invalidateRequest() {
     setRequestId(newId());
@@ -146,7 +153,23 @@ export default function InboundStockPage() {
         if (responses[i].error) throw responses[i].error;
         const qc = codes[i];
         nextRacks[qc] = (responses[i].data ?? []) as Rack[];
-        if (nextRacks[qc].length === 1) nextIds[qc] = nextRacks[qc][0].location_id;
+        // HIPRIMA_INBOUND_RACK_RECOMMENDATION_V43K
+        // Sarankan rak Normal yang sudah memiliki stok SKU terbanyak.
+        // Jangan menebak jika stok kosong atau ada peringkat yang sama.
+        const available = nextRacks[qc];
+        if (qc === "NORMAL" && available.length > 1) {
+          available.sort((a, b) =>
+            Number(b.current_qty ?? 0) - Number(a.current_qty ?? 0)
+          );
+          const best = Number(available[0]?.current_qty ?? 0);
+          const second = Number(available[1]?.current_qty ?? 0);
+          if (best > 0 && best > second) {
+            nextIds[qc] = available[0].location_id;
+          }
+        }
+        if (available.length === 1) {
+          nextIds[qc] = available[0].location_id;
+        }
       }
       setChosen(item); setRacks(nextRacks); setRackIds(nextIds);
       setTotalText(""); setDefectText("0"); setRejectText("0");
@@ -209,7 +232,7 @@ export default function InboundStockPage() {
 
             {receipt ? <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
               <h2 className="text-xl font-bold text-emerald-900">Inbound berhasil dicatat</h2>
-              <p className="mt-1 text-sm text-emerald-900">Nomor penerimaan: <b>{receipt.receipt_no}</b> â€” Total {number(receipt.total_qty)} pcs</p>
+              <p className="mt-1 text-sm text-emerald-900">Nomor penerimaan: <b>{receipt.receipt_no}</b>  -  Total {number(receipt.total_qty)} pcs</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">{receipt.items.map(row =>
                 <div key={row.qc} className="rounded-xl bg-white p-3 text-sm"><b>{labels[row.qc]}: {number(row.qty)} pcs</b><div className="text-xs text-slate-500">Movement #{row.movement_no}</div></div>
               )}</div>
@@ -224,7 +247,7 @@ export default function InboundStockPage() {
                 </form>
                 {results.length > 0 && <div className="mt-3 divide-y rounded-xl border">{results.map(row =>
                   <div key={row.variant_id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                    <div className="min-w-0"><b className="break-all">{row.sku}</b><p className="text-sm text-slate-600">{row.product_name} â€¢ {row.color || "-"} â€¢ {row.size || "-"}</p><p className="text-xs text-slate-500">Stok saat ini: {number(row.total_qty)}</p></div>
+                    <div className="min-w-0"><b className="break-all">{row.sku}</b><p className="text-sm text-slate-600">{row.product_name}  |  {row.color || "-"}  |  {row.size || "-"}</p><p className="text-xs text-slate-500">Stok saat ini: {number(row.total_qty)}</p></div>
                     <button type="button" disabled={loading || chosen?.variant_id === row.variant_id} className="rounded-lg border px-4 py-2 text-sm disabled:bg-slate-100" onClick={() => void selectSku(row.variant_id)}>{chosen?.variant_id === row.variant_id ? "Dipilih" : "Pilih"}</button>
                   </div>
                 )}</div>}
@@ -232,7 +255,7 @@ export default function InboundStockPage() {
 
               {chosen && <form onSubmit={submit} className="space-y-5">
                 <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h2 className="font-bold">2. Hasil QC â€” {chosen.sku}</h2>
+                  <h2 className="font-bold">2. Hasil QC  -  {chosen.sku}</h2>
                   <p className="mt-1 text-sm text-slate-500">Isi total, Defect, dan Reject. Jumlah Normal dihitung otomatis.</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <label className="text-sm font-medium">Total Diterima<input type="number" min="1" step="1" required className={field + " mt-2"} value={totalText} onChange={e => {setTotalText(e.target.value);invalidateRequest();}} placeholder="Contoh 100" /></label>
@@ -240,7 +263,7 @@ export default function InboundStockPage() {
                     <label className="text-sm font-medium">Reject<input type="number" min="0" step="1" required className={field + " mt-2"} value={rejectText} onChange={e => {setRejectText(e.target.value);invalidateRequest();}} /></label>
                   </div>
                   <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
-                    <b>Normal otomatis: {splitValid ? number(normal) : "â€”"} pcs</b>
+                    <b>Normal otomatis: {splitValid ? number(normal) : " - "} pcs</b>
                     <p className={splitValid ? "mt-1 text-slate-600" : "mt-1 text-red-700"}>{splitValid ? `Normal ${normal} + Defect ${defect} + Reject ${reject} = Total ${total} pcs` : "Jumlah Defect + Reject tidak boleh melebihi total, dan semua angka harus bilangan bulat."}</p>
                   </div>
                 </section>
@@ -251,12 +274,20 @@ export default function InboundStockPage() {
                   <div className="mt-4 grid gap-3">
                     {codes.map(qc => <div key={qc} className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-[130px_100px_minmax(0,1fr)] sm:items-center">
                       <div><b className="text-sm">{labels[qc]}</b><p className="text-xs text-slate-500">{hints[qc]}</p></div>
-                      <span className="text-sm font-semibold">{splitValid ? number(qtyByQc[qc]) : "â€”"} pcs</span>
+                      <span className="text-sm font-semibold">{splitValid ? number(qtyByQc[qc]) : " - "} pcs</span>
                       {qtyByQc[qc] > 0 && splitValid ?
                         <select className={field} value={rackIds[qc]} required onChange={e => {setRackIds(prev => ({...prev, [qc]: e.target.value}));invalidateRequest();}}>
                           <option value="">Pilih rak {labels[qc]}</option>
-                          {racks[qc].map(r => <option key={r.location_id} value={r.location_id}>{r.location_code} â€” {r.location_name} (stok {number(r.current_qty)})</option>)}
+                          {racks[qc].map(r => <option key={r.location_id} value={r.location_id}>{r.location_code}  -  {r.location_name} (stok {number(r.current_qty)})</option>)}
                         </select> : <span className="text-xs text-slate-400">Tidak ada barang kategori ini</span>}
+                      {qc === "NORMAL" && recommendedNormal && splitValid && qtyByQc.NORMAL > 0 && (
+                        <p className="text-xs text-emerald-800 sm:col-span-3">
+                          Rekomendasi: rak {recommendedNormal.location_code}
+                          {" "} (stok SKU {number(recommendedNormal.current_qty)} pcs).
+                          Pastikan lokasi fisik dan kapasitas rak sesuai.
+                          Pilihan dapat diganti.
+                        </p>
+                      )}
                       {splitValid && qtyByQc[qc] > 0 && racks[qc].length === 0 && <p className="text-sm text-red-700 sm:col-span-3">Belum ada rak aktif untuk {labels[qc]}. Hubungi Admin.</p>}
                     </div>)}
                   </div>
