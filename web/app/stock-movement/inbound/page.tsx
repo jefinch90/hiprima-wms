@@ -182,13 +182,14 @@ export default function InboundStockPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || !chosen || !backendReady || !racksValid) return;
+    if (!reference.trim()) {setErrorText("Nomor Surat Jalan wajib diisi.");return;}
     const id = requestId || newId();
     if (!id) {setErrorText("Browser tidak dapat membuat identitas transaksi.");return;}
     setRequestId(id);
     const items = codes.filter(qc => qtyByQc[qc] > 0).map(qc => ({
       qc, qty: qtyByQc[qc], location_id: rackIds[qc],
     }));
-    if (!window.confirm(`Konfirmasi inbound ${total} pcs untuk ${chosen.sku}?\nNormal ${normal}, Defect ${defect}, Reject ${reject}.\nStok LIVE akan bertambah setelah konfirmasi.`)) return;
+    if (!window.confirm(`Konfirmasi inbound ${total} pcs untuk ${chosen.sku}?\nNormal ${normal}, Defect ${defect}, Reject ${reject}.\nSurat Jalan: ${reference.trim()}.\nStok LIVE akan bertambah setelah konfirmasi.`)) return;
     setBusy(true); setErrorText("");
     try {
       const {data, error} = await supabase.rpc("wms_receive_inbound_qc_batch", {
@@ -206,7 +207,14 @@ export default function InboundStockPage() {
       }
       setReceipt(saved);
     } catch (e) {
-      setErrorText((e instanceof Error ? e.message : "Inbound gagal.") + " Jika koneksi terputus, ulangi dengan data sama agar tidak menggandakan stok.");
+      const detail = e instanceof Error ? e.message : "Inbound gagal.";
+      const code = e && typeof e === "object" && "code" in e
+        ? String((e as {code?: unknown}).code ?? "") : "";
+      const duplicate = code === "23505" &&
+        detail.includes("wms_inbound_qc_sku_sj_unique_v43l");
+      setErrorText(duplicate
+        ? `DITOLAK: Surat Jalan ${reference.trim()} sudah pernah diterima untuk SKU ${chosen.sku}. Periksa riwayat penerimaan; jangan input ulang.`
+        : detail + " Jika koneksi terputus, ulangi dengan data sama agar tidak menggandakan stok.");
     } finally {setBusy(false);}
   }
 
@@ -296,11 +304,11 @@ export default function InboundStockPage() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                   <h2 className="font-bold">4. Konfirmasi penerimaan</h2>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-sm font-medium">Referensi PO / Surat Jalan (opsional)<input className={field + " mt-2"} value={reference} onChange={e => {setReference(e.target.value);invalidateRequest();}} placeholder="Nomor PO / SJ" /></label>
+                    <label className="text-sm font-medium">Nomor Surat Jalan (wajib)<input required maxLength={120} className={field + " mt-2"} value={reference} onChange={e => {setReference(e.target.value);invalidateRequest();}} placeholder="Contoh: SJ-20261122-001" /></label>
                     <label className="text-sm font-medium">Catatan (opsional)<input className={field + " mt-2"} value={notes} onChange={e => {setNotes(e.target.value);invalidateRequest();}} placeholder="Catatan QC" /></label>
                   </div>
                   <p className="mt-3 text-xs text-slate-600">Satu konfirmasi akan mencatat seluruh kategori QC dalam satu transaksi. Jika satu kategori gagal, semuanya dibatalkan.</p>
-                  <button type="submit" disabled={busy || loading || !backendReady || !racksValid} className="mt-4 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400">{busy ? "Memproses..." : `Konfirmasi Inbound ${splitValid ? number(total) : ""} pcs`}</button>
+                  <button type="submit" disabled={busy || loading || !backendReady || !racksValid || !reference.trim()} className="mt-4 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400">{busy ? "Memproses..." : `Konfirmasi Inbound ${splitValid ? number(total) : ""} pcs`}</button>
                 </section>
               </form>}
             </>}
