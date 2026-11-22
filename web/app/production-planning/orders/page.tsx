@@ -47,6 +47,8 @@ export default function ProductionOrdersPage() {
   const [poDate,setPoDate]=useState(nowDate());
   const [poEta,setPoEta]=useState("");
   const [etaDraft,setEtaDraft]=useState<Record<string,string>>({});
+  // HIPRIMA_PO_AUTO_ETA_V43J: UI membaca asal PO, tidak mengubah ETA database.
+  const [etaOrigin,setEtaOrigin]=useState<{id:string;mode:"checking"|"auto"|"manual"|"unknown"}>({id:"",mode:"checking"});
   const [groupKey,setGroupKey]=useState("");
   const [sku,setSku]=useState("");
   const [skuSearchMessage,setSkuSearchMessage]=useState("");
@@ -139,6 +141,24 @@ export default function ProductionOrdersPage() {
   }
   const selectedOrder=orders.find(o=>o.id===selected);
   const selectedLines=lines.filter(l=>l.po_id===selected);
+  // PO dari workflow produksi memperoleh snapshot lead time dan ETA dari RPC.
+  // Read-only, fail-closed bila hubungan PO tidak dapat diverifikasi.
+  useEffect(()=>{
+    let active=true;
+    setEtaOrigin({id:selected,mode:"checking"});
+    if(!selected)return ()=>{active=false;};
+    void (async()=>{
+      try{
+        const {data,error}=await createClient().from("wms_production_po_conversion_orders")
+          .select("po_id").eq("po_id",selected).limit(1);
+        if(active)setEtaOrigin({id:selected,mode:error?"unknown":data?.length?"auto":"manual"});
+      }catch{
+        if(active)setEtaOrigin({id:selected,mode:"unknown"});
+      }
+    })();
+    return ()=>{active=false;};
+  },[selected]);
+  const selectedEtaMode=etaOrigin.id===selected?etaOrigin.mode:"checking";
 const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_name || "Vendor tidak ditemukan";
   const filteredPo=orders.filter(o=>{
     const query=poSearch.trim().toLowerCase();
@@ -358,21 +378,23 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
       throw new Error("Jumlah item PO tidak cocok dengan bukti snapshot; ekspor diblokir.");
     }
     const {data:approvedLines,error:alError}=await supabase.from("wms_production_operational_approval_lines")
-      .select("source_review_line_id,vendor_id,variant_id,quote_id,proposed_qty,vendor_unit_price_snapshot,currency_snapshot")
+      .select("source_review_line_id,vendor_id,variant_id,quote_id,quote_verified_at_snapshot,master_hpp_snapshot,proposed_qty,vendor_unit_price_snapshot,currency_snapshot")
       .eq("approval_id",approval.id).limit(10000);
     if(alError)throw new Error("Tidak dapat membaca detail approval: "+alError.message);
     if(!approvedLines||approvedLines.length!==conversionLines.length){
       throw new Error("Detail approval tidak lengkap dibanding baris PO.");
     }
+    // HIPRIMA_PO_HPP_DEFAULT_V43J: standar HPP boleh hanya bila tersimpan pada snapshot approval.
+    // Harga khusus/perubahan tetap mensyaratkan quote VERIFIED sebelum approval.
     const quoteIds=Array.from(new Set(conversionLines.map(l=>String(l.quote_id||"")).filter(Boolean)));
-    if(quoteIds.length===0||conversionLines.some(l=>!l.quote_id)){
-      throw new Error("Ada harga default dari HPP Master atau harga tanpa quote terverifikasi. PO komersial tidak boleh dibuat otomatis.");
-    }
-    const {data:quotes,error:qError}=await supabase.from("wms_vendor_variant_quotes")
+    const quoteResult=quoteIds.length ? await supabase.from("wms_vendor_variant_quotes")
       .select("id,vendor_id,variant_id,unit_price,currency,status,verified_by,verified_at,created_by,scope_batch_id")
-      .in("id",quoteIds).limit(10000);
-    if(qError)throw new Error("Gagal memverifikasi penawaran vendor: "+qError.message);
-    const quoteMap=new Map((quotes||[]).map(q=>[q.id,q]));
+      .in("id",quoteIds).limit(10000) : null;
+    if(quoteResult?.error)throw new Error("Gagal memverifikasi harga khusus vendor: "+quoteResult.error.message);
+    if(quoteIds.length && (quoteResult?.data?.length ?? 0)!==quoteIds.length){
+      throw new Error("Bukti perubahan harga belum lengkap.");
+    }
+    const quoteMap=new Map((quoteResult?.data||[]).map(q=>[q.id,q]));
     const approvedMap=new Map(approvedLines.map(a=>[a.source_review_line_id,a]));
     const poLineMap=new Map(selectedLines.map(l=>[l.id,l]));
     const seenIds=new Set<string>();
@@ -382,28 +404,44 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
       seenIds.add(cl.po_line_id);
       const l=poLineMap.get(cl.po_line_id);
       const al=approvedMap.get(cl.source_review_line_id);
-      const q=quoteMap.get(cl.quote_id);
-      if(!l||!al||!q)throw new Error("Pemetaan item PO / approval / penawaran tidak lengkap.");
+      const q=cl.quote_id ? quoteMap.get(cl.quote_id) : null;
+      if(!l||!al)throw new Error("Pemetaan item PO dan approval tidak lengkap.");
       if(al.vendor_id!==po.vendor_id||al.variant_id!==l.variant_id||
-        al.quote_id!==cl.quote_id||q.vendor_id!==po.vendor_id||q.variant_id!==l.variant_id){
-        throw new Error("Identitas vendor, varian atau quote tidak sama dengan approval.");
-      }
-      if(q.scope_batch_id&&q.scope_batch_id!==conversion.source_batch_id){
-        throw new Error("Penawaran ini hanya berlaku untuk batch lain.");
-      }
-      if(q.status!=="VERIFIED"||!q.verified_by||!q.verified_at||q.verified_by===q.created_by){
-        throw new Error("Harga vendor belum diverifikasi secara independen.");
-      }
-      if(new Date(q.verified_at).getTime()>new Date(approval.decided_at).getTime()){
-        throw new Error("Harga vendor diverifikasi setelah approval; dokumen tidak valid.");
+         (al.quote_id??null)!==(cl.quote_id??null)){
+        throw new Error("SKU, vendor, atau sumber harga tidak sama dengan approval.");
       }
       const qty=Number(cl.ordered_qty_snapshot);
       const price=Number(cl.vendor_unit_price_snapshot);
       if(!Number.isInteger(qty)||qty<=0||!Number.isFinite(price)||price<=0||
          qty!==Number(l.ordered_qty)||qty!==Number(al.proposed_qty)||
-         cl.currency_snapshot!=="IDR"||al.currency_snapshot!=="IDR"||q.currency!=="IDR"||
-         !officialSameMoney(price,al.vendor_unit_price_snapshot)||!officialSameMoney(price,q.unit_price)){
-        throw new Error("Qty, snapshot harga atau mata uang berbeda; ekspor PO resmi dihentikan.");
+         cl.currency_snapshot!=="IDR"||al.currency_snapshot!=="IDR"||
+         !officialSameMoney(price,al.vendor_unit_price_snapshot)){
+        throw new Error("Qty atau snapshot harga berbeda dari persetujuan. Ekspor ditolak.");
+      }
+      if(cl.quote_id){
+        if(!q||q.vendor_id!==po.vendor_id||q.variant_id!==l.variant_id){
+          throw new Error("Quote vendor tidak sesuai dengan PO.");
+        }
+        if(q.scope_batch_id&&q.scope_batch_id!==conversion.source_batch_id){
+          throw new Error("Quote hanya berlaku untuk batch lain.");
+        }
+        if(q.status!=="VERIFIED"||!q.verified_by||!q.verified_at||
+           q.verified_by===q.created_by||!al.quote_verified_at_snapshot){
+          throw new Error("Harga khusus vendor belum diverifikasi independen.");
+        }
+        if(new Date(q.verified_at).getTime()>new Date(approval.decided_at).getTime()||
+           new Date(al.quote_verified_at_snapshot).getTime()>new Date(approval.decided_at).getTime()){
+          throw new Error("Verifikasi harga dilakukan setelah approval.");
+        }
+        if(q.currency!=="IDR"||!officialSameMoney(price,q.unit_price)){
+          throw new Error("Harga quote tidak cocok dengan snapshot approval.");
+        }
+      }else{
+        const standard=Number(al.master_hpp_snapshot);
+        if(!Number.isFinite(standard)||standard<=0||al.quote_verified_at_snapshot!=null||
+           !officialSameMoney(price,standard)){
+          throw new Error("Harga HPP standar tidak cocok dengan snapshot approval.");
+        }
       }
       if(!l.source_sku||!l.source_product_name)throw new Error("Identitas SKU/produk tidak lengkap.");
       result.push({id:l.id,sku:l.source_sku,product:l.source_product_name,
@@ -423,7 +461,7 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
   async function showOfficialPoPreview(){
     setVerifiedPoBusy(true);setVerifiedPoMessage("");setVerifiedPo(null);
     try{const doc=await checkAndReadOfficialPo();setVerifiedPo(doc);
-      setVerifiedPoMessage("VERIFIED: Harga vendor, persetujuan, dan seluruh item PO cocok. Dokumen siap ditinjau.");
+      setVerifiedPoMessage("VERIFIED: Harga PO cocok dengan persetujuan Owner/Admin. Dokumen siap diunduh.");
     }catch(e){setVerifiedPoMessage("BELUM SIAP: "+(e instanceof Error?e.message:String(e)));}
     finally{setVerifiedPoBusy(false);}
   }
@@ -433,20 +471,20 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
     try{
       const doc=await checkAndReadOfficialPo();
       setVerifiedPo(doc);
-      if(!window.confirm("PO RESMI "+doc.number+" untuk "+doc.vendor+". Qty "+officialAmount(doc.totalQty)+
+      if(!window.confirm("PO Vendor "+doc.number+" untuk "+doc.vendor+". Qty "+officialAmount(doc.totalQty)+
         " pcs; nilai Rp "+officialAmount(doc.totalAmount)+". Pastikan akan dikirim ke vendor yang benar. Download?"))return;
       const safe=(s:string)=>s.replace(/[^A-Za-z0-9_-]+/g,"-").slice(0,60);
-      const filename="PO-RESMI-"+safe(doc.number)+"-"+safe(doc.vendor);
+      const filename="PO-Vendor-"+safe(doc.number)+"-"+safe(doc.vendor);
       if(format==="xlsx"){
         const {Workbook}=await import("exceljs");
         const wb=new Workbook();wb.creator="Hi.PRIMA WMS";
-        wb.subject="Purchase Order resmi dari approval dan penawaran vendor terverifikasi";
-        const ws=wb.addWorksheet("PO Resmi",{views:[{state:"frozen",ySplit:9}]});
+        wb.subject="PO Vendor berdasarkan harga snapshot yang disetujui";
+        const ws=wb.addWorksheet("PO Vendor",{views:[{state:"frozen",ySplit:9}]});
         ws.columns=[{key:"no",width:7},{key:"sku",width:28},{key:"product",width:40},
           {key:"qty",width:14},{key:"price",width:22},{key:"subtotal",width:26}];
         ws.mergeCells("A1:F1");ws.getCell("A1").value="Hi.PRIMA | PT Prima Berkah Mulia";
         ws.getCell("A1").font={bold:true,size:16,color:{argb:"FF0F172A"}};ws.getRow(1).height=28;
-        ws.mergeCells("A2:F2");ws.getCell("A2").value="PURCHASE ORDER RESMI - HARGA VENDOR TERVERIFIKASI";
+        ws.mergeCells("A2:F2");ws.getCell("A2").value="PO VENDOR - HARGA DISETUJUI";
         ws.getCell("A2").font={bold:true,size:12};
         ws.getCell("A3").value="Nomor PO";ws.getCell("B3").value=doc.number;
         ws.getCell("D3").value="Vendor";ws.getCell("E3").value=doc.vendor;
@@ -485,7 +523,7 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
         function footer(){
           pdf.setDrawColor(203,213,225);pdf.line(L,281,R,281);
           pdf.setFontSize(7);pdf.setFont("helvetica","normal");pdf.setTextColor(100,116,139);
-          pdf.text("PO resmi dari approval WMS - harga sesuai quote vendor terverifikasi",L,286);
+          pdf.text("PO Vendor - harga snapshot disetujui Owner/Admin",L,286);
           pdf.text("Hal. "+pdf.getNumberOfPages(),R,286,{align:"right"});
         }
         function head(continuation:boolean){
@@ -650,7 +688,7 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
                 <div className="flex gap-2"><button className={soft} disabled={poPageSafe<=1} onClick={()=>setPoPage(p=>Math.max(1,p-1))}>Sebelumnya</button><button className={soft} disabled={poPageSafe>=poPageCount} onClick={()=>setPoPage(p=>Math.min(poPageCount,p+1))}>Berikutnya</button></div>
               </div>
             </section>
-            {selectedOrder && <section id="po-detail" className="min-w-0 scroll-mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap items-start gap-2">{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>setShowPoPreview(v=>!v)}>{showPoPreview?"Tutup Preview":"Preview Vendor"}</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={btn} onClick={()=>void downloadPoQuantityPdf()}>PDF Rincian Qty</button>}{selectedOrder.status==="FINAL"&&<button type="button" className={soft} onClick={()=>void downloadPoQuantityExcel()}>Excel Rincian Qty</button>}<details className="rounded-xl border border-slate-200 p-2"><summary className="cursor-pointer px-2 text-sm font-semibold text-slate-700">Tindakan Admin</summary><div className="mt-3 flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></details></div></div>
+            {selectedOrder && <section id="po-detail" className="min-w-0 scroll-mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">{selectedOrder.po_number}</h2><p className="text-sm text-slate-500">{display(selectedOrder.status)} · Estimasi: {selectedOrder.eta_date||"belum ditetapkan"}</p></div><div className="flex flex-wrap items-start gap-2"><details className="rounded-xl border border-slate-200 p-2"><summary className="cursor-pointer px-2 text-sm font-semibold text-slate-700">Tindakan Admin</summary><div className="mt-3 flex flex-wrap gap-2">{selectedOrder.status==="DRAFT" && owner && <button disabled={busy} className={btn} onClick={()=>{if(window.confirm("Finalkan PO ini? Setelah Final, qty dan mapping tidak dapat diubah."))void run("Finalisasi PO",async()=>{await call("wms_po_finalize",{p_po_id:selected});});}}>Finalkan PO (Owner/Admin)</button>}{selectedOrder.status==="FINAL"&&owner&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Tutup PO hanya jika semua qty sudah diterima atau dibatalkan?"))void run("Tutup PO",async()=>{await call("wms_po_close",{p_po_id:selected});});}}>Tutup PO</button>}{owner&&(selectedOrder.status==="DRAFT"||selectedOrder.status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{if(window.confirm("Batalkan seluruh PO? Tidak ada stok yang akan diubah."))void run("Batalkan PO",async()=>{await call("wms_po_cancel_order",{p_po_id:selected});});}}>Batalkan PO</button>}</div></details></div></div>
 <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
                 <b>Vendor:</b> {poVendorName(selectedOrder.vendor_id)} <span className="mx-2 text-slate-300">|</span> <b>Tanggal:</b> {selectedOrder.order_date}
                 <span className="mx-2 text-slate-300">|</span><b>ETA:</b> {selectedOrder.eta_date||"Belum ditetapkan"}
@@ -658,51 +696,65 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {[["Item SKU",selectedLines.length],["Qty Dipesan",selectedOrdered],["Diterima",selectedReceived],["Belum Datang",selectedRemaining]].map(([label,value])=><div key={String(label)} className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{money(Number(value))}</p></div>)}
               </div>
-              {selectedOrder.status==="FINAL"&&<p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">PDF rincian qty belum memuat harga vendor terverifikasi. Jangan kirim sebagai PO komersial tanpa lampiran penawaran harga yang telah disetujui.</p>}
-              {selectedOrder.status==="FINAL"&&showPoPreview&&<div className="space-y-4 rounded-xl border-2 border-slate-300 bg-white p-4 md:p-6">
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4"><div><p className="text-xl font-extrabold text-slate-900">Hi.PRIMA</p><p className="text-xs text-slate-500">PT Prima Berkah Mulia</p></div><div className="text-right"><p className="text-base font-bold">RINCIAN ORDER PRODUKSI</p><p className="text-xs text-slate-500">FINAL - kuantitas saja</p></div></div>
-                <div className="grid gap-2 text-sm md:grid-cols-2"><p><b>Nomor PO:</b> {selectedOrder.po_number}</p><p><b>Vendor:</b> {poVendorName(selectedOrder.vendor_id)}</p><p><b>Tanggal:</b> {selectedOrder.order_date}</p><p><b>ETA:</b> {selectedOrder.eta_date||"Belum ditentukan"}</p></div>
-                <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[440px] text-left text-sm"><thead className="bg-slate-50"><tr><th className="p-3">SKU</th><th className="p-3">Produk</th><th className="p-3 text-right">Qty</th></tr></thead><tbody className="divide-y divide-slate-100">{selectedLines.map(l=><tr key={l.id}><td className="p-3 font-semibold">{l.source_sku}</td><td className="p-3">{l.source_product_name||"-"}</td><td className="p-3 text-right font-semibold">{money(l.ordered_qty)}</td></tr>)}</tbody><tfoot className="bg-slate-50"><tr><td colSpan={2} className="p-3 font-bold">TOTAL</td><td className="p-3 text-right font-bold">{money(selectedOrdered)} pcs</td></tr></tfoot></table></div>
-                <p className="text-xs text-amber-900">Belum memuat harga yang disetujui. Untuk dikirim ke vendor, lampirkan penawaran harga resmi yang telah diverifikasi.</p>
-                <button className={btn} type="button" onClick={()=>void downloadPoQuantityPdf()}>Download PDF Rincian Qty</button><button className={soft} type="button" onClick={()=>void downloadPoQuantityExcel()}>Download Excel Rincian Qty</button>
-              </div>}
 
-              {selectedOrder.status==="FINAL"&&owner&&<section className="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 md:p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-bold text-slate-900">PO Vendor - V4.3H</h3>
-                    <p className="text-xs text-slate-600">Harga hanya dari quote terverifikasi + snapshot PO + approval Owner/Admin. Data read-only.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className={soft} disabled={verifiedPoBusy} onClick={()=>void showOfficialPoPreview()}>
-                      {verifiedPoBusy?"Memeriksa...":"Preview PO Vendor"}
-                    </button>
-                    <button type="button" className={btn} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} onClick={()=>void exportOfficialPo("pdf")}>Download PDF</button>
-                    <button type="button" className={soft} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} onClick={()=>void exportOfficialPo("xlsx")}>Download Excel</button>
-                  </div>
+              {selectedEtaMode==="auto"&&<p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">ETA dihitung otomatis dari snapshot lead time per SKU-vendor saat PO dibuat. ETA PO mengikuti tanggal item yang paling akhir.</p>}
+              {selectedEtaMode==="manual"&&<p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">PO lama atau PO manual: tanggal yang tersimpan tetap berlaku. Tidak dihitung ulang otomatis.</p>}
+              {selectedEtaMode==="unknown"&&<p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Sumber PO belum dapat diverifikasi. Perubahan ETA ditahan sampai Admin memeriksa data.</p>}
+              {/* HIPRIMA_PO_SIMPLE_DOCS_V43I: satu tempat untuk preview dan unduh dokumen */}
+              {selectedOrder.status==="FINAL"&&<section className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-3 md:p-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Dokumen PO</h3>
+                  <p className="text-xs text-slate-500">Pilih jenis dokumen. Semua SKU dalam PO akan ikut di PDF dan Excel.</p>
                 </div>
-                {verifiedPoMessage&&<p role="status" className={"rounded-lg px-3 py-2 text-sm "+(verifiedPoMessage.startsWith("VERIFIED")||verifiedPoMessage.startsWith("DOWNLOAD")?"bg-emerald-50 text-emerald-800":"bg-amber-50 text-amber-900")}>{verifiedPoMessage}</p>}
-                {verifiedPo?.poId===selectedOrder.id&&<div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex flex-wrap justify-between gap-3 text-sm">
-                    <span><b>PO {verifiedPo.number}</b> - {verifiedPo.vendor}</span>
-                    <span>Disetujui {verifiedPo.approverRole} | ETA {verifiedPo.eta}</span>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900">Rincian Qty</p>
+                      <p className="text-xs text-slate-600">Tanpa harga. Untuk daftar barang dan jumlah produksi.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={soft} aria-label="Preview rincian Qty" onClick={()=>{setShowPoPreview(v=>!v);setVerifiedPo(null);setVerifiedPoMessage("");}}>{showPoPreview?"Tutup Preview":"Preview"}</button>
+                      <button type="button" className={soft} aria-label="Download PDF rincian Qty" onClick={()=>void downloadPoQuantityPdf()}>PDF</button>
+                      <button type="button" className={soft} aria-label="Download Excel rincian Qty" onClick={()=>void downloadPoQuantityExcel()}>Excel</button>
+                    </div>
                   </div>
-                  <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-slate-200">
-                    <table className="min-w-[720px] w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr>
-                      <th className="p-2">SKU</th><th className="p-2">Produk</th>
-                      <th className="p-2 text-right">Qty</th><th className="p-2 text-right">Harga Vendor</th><th className="p-2 text-right">Subtotal</th>
-                    </tr></thead><tbody className="divide-y divide-slate-100">
-                      {verifiedPo.lines.map(l=><tr key={l.id}><td className="p-2 font-semibold">{l.sku}</td><td className="p-2">{l.product}</td>
-                        <td className="p-2 text-right">{officialAmount(l.qty)}</td><td className="p-2 text-right">Rp {officialAmount(l.price)}</td>
-                        <td className="p-2 text-right font-semibold">Rp {officialAmount(l.subtotal)}</td></tr>)}
-                    </tbody><tfoot className="bg-slate-50 font-bold"><tr><td colSpan={2} className="p-3">TOTAL PO</td>
-                      <td className="p-3 text-right">{officialAmount(verifiedPo.totalQty)}</td><td></td>
-                      <td className="p-3 text-right">Rp {officialAmount(verifiedPo.totalAmount)}</td></tr></tfoot></table>
+                  {showPoPreview&&<div className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                      <div><p className="font-bold text-slate-900">Hi.PRIMA Â· Rincian Qty</p><p className="text-xs text-slate-500">PO {selectedOrder.po_number} Â· {poVendorName(selectedOrder.vendor_id)}</p></div>
+                      <span className="text-sm font-semibold text-slate-800">{money(selectedOrdered)} pcs</span>
+                    </div>
+                    <div className="max-h-[350px] overflow-auto rounded-lg border border-slate-200">
+                      <table className="min-w-[430px] w-full text-left text-sm">
+                        <thead className="sticky top-0 bg-slate-100 text-slate-700"><tr><th className="p-2">SKU</th><th className="p-2">Produk</th><th className="p-2 text-right">Qty</th></tr></thead>
+                        <tbody className="divide-y divide-slate-100">{selectedLines.map(l=><tr key={l.id}><td className="p-2 font-medium">{l.source_sku}</td><td className="p-2">{l.source_product_name||"-"}</td><td className="p-2 text-right">{money(l.ordered_qty)}</td></tr>)}</tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-amber-800">Tanpa harga vendor. Bukan dokumen kesepakatan harga.</p>
+                  </div>}
+                </div>
+                {owner&&<div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900">PO Vendor</p>
+                      <p className="text-xs text-slate-600">Dengan harga disetujui. Harga HPP otomatis; perubahan perlu verifikasi. Approval dan ETA wajib.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={soft} disabled={verifiedPoBusy} aria-label="Preview PO Vendor" onClick={()=>{setShowPoPreview(false);void showOfficialPoPreview();}}>{verifiedPoBusy?"Memeriksa...":"Preview"}</button>
+                      <button type="button" className={soft} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} aria-label="Download PDF PO Vendor" onClick={()=>void exportOfficialPo("pdf")}>PDF</button>
+                      <button type="button" className={soft} disabled={verifiedPoBusy||verifiedPo?.poId!==selectedOrder.id} aria-label="Download Excel PO Vendor" onClick={()=>void exportOfficialPo("xlsx")}>Excel</button>
+                    </div>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">Seluruh item termasuk dalam ekspor. Harga HPP/margin internal tidak ditampilkan.</p>
+                  {verifiedPoMessage&&<p role="status" className={"mt-3 rounded-lg px-3 py-2 text-sm "+(verifiedPoMessage.startsWith("VERIFIED")||verifiedPoMessage.startsWith("DOWNLOAD")?"bg-emerald-50 text-emerald-800":"bg-amber-50 text-amber-900")}>{verifiedPoMessage}</p>}
+                  {verifiedPo?.poId===selectedOrder.id&&<div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex flex-wrap justify-between gap-2 text-sm"><span><b>PO {verifiedPo.number}</b> Â· {verifiedPo.vendor}</span><span>ETA {verifiedPo.eta} Â· Disetujui {verifiedPo.approverRole}</span></div>
+                    <div className="mt-3 max-h-[350px] overflow-auto rounded-lg border border-slate-200">
+                      <table className="min-w-[690px] w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100"><tr><th className="p-2">SKU</th><th className="p-2">Produk</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Harga Vendor</th><th className="p-2 text-right">Subtotal</th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">{verifiedPo.lines.map(l=><tr key={l.id}><td className="p-2 font-medium">{l.sku}</td><td className="p-2">{l.product}</td><td className="p-2 text-right">{money(l.qty)}</td><td className="p-2 text-right">Rp {officialAmount(l.price)}</td><td className="p-2 text-right">Rp {officialAmount(l.subtotal)}</td></tr>)}</tbody>
+                      <tfoot className="bg-slate-50 font-bold"><tr><td colSpan={2} className="p-3">TOTAL</td><td className="p-3 text-right">{money(verifiedPo.totalQty)}</td><td></td><td className="p-3 text-right">Rp {officialAmount(verifiedPo.totalAmount)}</td></tr></tfoot></table>
+                    </div>
+                  </div>}
                 </div>}
               </section>}
-
               {selectedOrder.status==="DRAFT"&&<div className="space-y-2 rounded-lg bg-slate-50 p-3"><b className="text-sm">Tambah SKU ke PO</b><div className="grid min-w-0 gap-2 md:grid-cols-5"><input className={inp} value={sku} onChange={e=>{setSku(e.target.value);setSkuSearchMessage("");}} placeholder="Cari SKU master"/><button className={soft} onClick={()=>void lookupSku()}>Cari SKU</button><select className={inp} value={variantId} onChange={e=>setVariantId(e.target.value)}><option value="">Pilih hasil</option>{variantMatches.map(v=><option value={v.id} key={v.id}>{v.sku} {v.color||""} {v.size||""}</option>)}</select><input className={inp} type="number" min="1" placeholder="Qty PO" value={qty} onChange={e=>setQty(e.target.value)}/><button className={btn} disabled={busy||!variantId||!(Number(qty)>0)} onClick={()=>void run("Tambah SKU",async()=>{await call("wms_po_add_line",{p_po_id:selected,p_variant_id:variantId,p_qty:Number(qty)});setQty("");setSku("");setVariantId("");setVariantMatches([]);setSkuSearchMessage("");})}>Tambah</button></div>{skuSearchMessage&&<p role="status" className="text-xs text-slate-600">{skuSearchMessage}</p>}</div>}
 
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:p-4">
@@ -724,13 +776,19 @@ const poVendorName=(vendorId:string)=>vendors.find(v=>v.id===vendorId)?.vendor_n
                 <select className={soft} disabled={busy||!['DRAFT','FINAL'].includes(l.po_status)} value={l.progress} onChange={e=>void run("Update progres",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:e.target.value,p_eta_date:null});})}><option value="UNCONFIRMED">Belum Dikonfirmasi</option><option value="IN_PRODUCTION">Dalam Produksi</option><option value="READY_AT_VENDOR">Ready at Vendor</option><option value="IN_TRANSIT">Dalam Pengiriman</option></select>
                 {l.po_status==="DRAFT" && <button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Qty PO untuk "+l.source_sku+" (angka positif):",String(l.ordered_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>0)void run("Update Qty PO",async()=>{await call("wms_po_set_draft_qty",{p_line_id:l.id,p_qty:Number(value)});});}}>Ubah Qty PO</button>}
                 {owner && (l.po_status==="DRAFT"||l.po_status==="FINAL")&&<button className={soft} disabled={busy} onClick={()=>{const value=window.prompt("Total qty DIBATALKAN (bukan tambahan), maksimum "+(l.ordered_qty-l.received_qty)+" pcs:",String(l.cancelled_qty));if(value!==null && Number.isInteger(Number(value)) && Number(value)>=0)void run("Update pembatalan",async()=>{await call("wms_po_cancel_qty",{p_line_id:l.id,p_cancel_qty:Number(value)});});}}>Qty Batal</button>}
-                {(l.po_status==="DRAFT"||l.po_status==="FINAL")&&<span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                {(l.po_status==="DRAFT"||l.po_status==="FINAL")&&(
+                  selectedEtaMode==="auto"
+                    ? <span className="text-xs font-semibold text-emerald-700">{l.eta_date?"ETA otomatis: "+l.eta_date:"ETA belum tercatat - periksa data lead time"}</span>
+                    : selectedEtaMode==="manual"
+                      ? <span className="inline-flex flex-wrap items-center gap-2 align-middle">
                   <label className="text-xs text-slate-600" htmlFor={`po-eta-${l.id}`}>ETA</label>
                   <input id={`po-eta-${l.id}`} aria-label={`Tanggal estimasi tiba untuk ${l.source_sku}`} title="Klik untuk memilih tanggal kedatangan" type="date" className={soft+" min-w-[158px] max-w-[190px]"} value={etaDraft[l.id]??l.eta_date??""}
                     onChange={e=>setEtaDraft(d=>({...d,[l.id]:e.target.value}))}
                     onClick={e=>{try{e.currentTarget.showPicker?.();}catch{}}}/>
                   <button className={soft} disabled={busy||!etaDraft[l.id]||etaDraft[l.id]===l.eta_date} onClick={()=>{const date=etaDraft[l.id];if(!date||!/^\d{4}-\d{2}-\d{2}$/.test(date)){setError("Pilih tanggal estimasi dari kalender.");return;}void run("Simpan ETA",async()=>{await call("wms_po_set_progress",{p_line_id:l.id,p_progress:l.progress,p_eta_date:date});setEtaDraft(d=>{const next={...d};delete next[l.id];return next;});});}}>Simpan ETA</button>
-                </span>}
+                </span>
+                      : <span className="text-xs text-amber-800">ETA menunggu pemeriksaan sumber PO</span>
+                )}
                 {l.po_status==="DRAFT" && !l.variant_id&&<button className={soft} onClick={()=>{setMapLineId(l.id);setSku(l.source_sku);setTab("po");}}>Mapping SKU</button>}
                 {l.po_status==="DRAFT"&&owner&&l.verified_vendor_lifecycle==="Seasonal"&&(l.seasonal_approved_at?<span className="text-xs font-semibold text-emerald-700">Seasonal disetujui</span>:<button className={soft} disabled={busy} onClick={()=>void run("Approval Seasonal",async()=>{await call("wms_po_approve_seasonal",{p_line_id:l.id});})}>Approval Seasonal</button>)}
                 {l.po_status==="FINAL"&&l.variant_id&&<button className={soft} disabled={busy} onClick={()=>void run("Cari Inbound",async()=>{const a=await call("wms_po_inbound_candidates",{p_line_id:l.id});setCandidates(x=>({...x,[l.id]:(a||[]) as Candidate[]}));})}>Cari Inbound</button>}
