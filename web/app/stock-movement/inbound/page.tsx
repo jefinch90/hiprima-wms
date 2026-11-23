@@ -25,8 +25,18 @@ type Rack = {
   area_code: string;
   current_qty: number;
 };
+type RackTip = {
+  location_id: string;
+  location_code: string;
+  location_name: string;
+  current_qty: number;
+  last_used_at: string | null;
+  last_movement_no: number | null;
+  recommendation_reason: "CURRENT" | "HISTORY";
+};
 type Line = {
   sku: Sku;
+  rackTip: RackTip | null;
   total: string;
   defect: string;
   reject: string;
@@ -150,9 +160,19 @@ export default function InboundMultiSkuPage() {
         if (rackResponses[i].error) throw rackResponses[i].error;
         options[qcs[i]] = (rackResponses[i].data ?? []) as Rack[];
       }
+      // V4.3N: rekomendasi berbasis stok saat ini atau histori pergerakan WMS.
+      // Jika RPC belum dipasang, formulir tetap berfungsi dengan rekomendasi V4.3M.
+      let rackTip: RackTip | null = null;
+      const suggestion = await supabase.rpc("wms_inbound_rack_recommendations", {
+        p_variant_id: variantId, p_area_code: "NORMAL"
+      });
+      if (!suggestion.error) {
+        const tips = (suggestion.data ?? []) as RackTip[];
+        rackTip = tips.find(t => options.NORMAL.some(r => r.location_id === t.location_id)) ?? null;
+      }
       const destinations = suggestRacks(options);
       setLines(prev => prev.some(l => l.sku.variant_id === variantId) ? prev : [
-        ...prev, {sku, total: "", defect: "0", reject: "0", racks: options, destinations}
+        ...prev, {sku, rackTip, total: "", defect: "0", reject: "0", racks: options, destinations}
       ]);
       invalidate();
     } catch (e) {
@@ -321,6 +341,20 @@ export default function InboundMultiSkuPage() {
                             {options.map(r => <option key={r.location_id} value={r.location_id}>{r.location_code} - {r.location_name} (stok {formatQty(r.current_qty)})</option>)}
                           </select> : <span className="text-xs text-slate-400">Tidak ada barang kategori ini</span>}
                           {qc === "NORMAL" && qty > 0 && candidate && <p className="text-xs text-emerald-800 sm:col-span-3">Rekomendasi rak {candidate.location_code} (stok SKU {formatQty(candidate.current_qty)}). Pastikan kapasitas dan posisi fisik sesuai; pilihan dapat diganti.</p>}
+                          {qc === "NORMAL" && qty > 0 && line.rackTip?.recommendation_reason === "HISTORY" &&
+                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3">
+                              <p className="min-w-0 flex-1">
+                                <b>Histori lokasi: rak {line.rackTip.location_code}</b> (stok SKU saat ini 0).
+                                {line.rackTip.last_used_at ? ` Terakhir masuk ${new Date(line.rackTip.last_used_at).toLocaleDateString("id-ID")}.` : ""}
+                                {line.rackTip.last_movement_no ? ` Movement #${line.rackTip.last_movement_no}.` : ""}
+                                {" "}Periksa posisi fisik dan kapasitas sebelum digunakan.
+                              </p>
+                              {line.destinations.NORMAL !== line.rackTip.location_id &&
+                                <button type="button" className={secondary} disabled={busy || loading}
+                                  onClick={() => editRack(line.sku.variant_id, "NORMAL", line.rackTip!.location_id)}>
+                                  Gunakan rak {line.rackTip.location_code}
+                                </button>}
+                            </div>}
                           {qty > 0 && options.length === 0 && <p className="text-xs text-red-700 sm:col-span-3">Tidak ada rak aktif untuk {qc}; hubungi Admin.</p>}
                         </div>;
                       })}
