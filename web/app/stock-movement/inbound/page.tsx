@@ -32,11 +32,12 @@ type RackTip = {
   current_qty: number;
   last_used_at: string | null;
   last_movement_no: number | null;
-  recommendation_reason: "CURRENT" | "HISTORY";
+  recommendation_reason: "CURRENT" | "HISTORY" | "IMPORT";
 };
 type Line = {
   sku: Sku;
   rackTip: RackTip | null;
+  rackTipError: boolean;
   total: string;
   defect: string;
   reject: string;
@@ -160,19 +161,26 @@ export default function InboundMultiSkuPage() {
         if (rackResponses[i].error) throw rackResponses[i].error;
         options[qcs[i]] = (rackResponses[i].data ?? []) as Rack[];
       }
-      // V4.3N: rekomendasi berbasis stok saat ini atau histori pergerakan WMS.
-      // Jika RPC belum dipasang, formulir tetap berfungsi dengan rekomendasi V4.3M.
+      // V4.3N.1: distinguish no recommendation from RPC failure.
       let rackTip: RackTip | null = null;
-      const suggestion = await supabase.rpc("wms_inbound_rack_recommendations", {
-        p_variant_id: variantId, p_area_code: "NORMAL"
-      });
-      if (!suggestion.error) {
-        const tips = (suggestion.data ?? []) as RackTip[];
-        rackTip = tips.find(t => options.NORMAL.some(r => r.location_id === t.location_id)) ?? null;
-      }
+      let rackTipError = false;
+      try {
+        const suggestion = await supabase.rpc("wms_inbound_rack_recommendations", {
+          p_variant_id: variantId, p_area_code: "NORMAL"
+        });
+        if (suggestion.error || !Array.isArray(suggestion.data)) {
+          rackTipError = true;
+        } else {
+          const tips = suggestion.data as RackTip[];
+          rackTip = tips.find(t => ["CURRENT", "HISTORY", "IMPORT"].includes(t.recommendation_reason) && options.NORMAL.some(r => r.location_id === t.location_id)) ?? null;
+          if (tips.length > 0 && !rackTip) rackTipError = true;
+        }
+      } catch { rackTipError = true; }
       const destinations = suggestRacks(options);
+      // Historical/import hints always require explicit physical confirmation.
+      if (rackTip?.recommendation_reason === "HISTORY" || rackTip?.recommendation_reason === "IMPORT") destinations.NORMAL = "";
       setLines(prev => prev.some(l => l.sku.variant_id === variantId) ? prev : [
-        ...prev, {sku, rackTip, total: "", defect: "0", reject: "0", racks: options, destinations}
+        ...prev, {sku, rackTip, rackTipError, total: "", defect: "0", reject: "0", racks: options, destinations}
       ]);
       invalidate();
     } catch (e) {
@@ -333,28 +341,33 @@ export default function InboundMultiSkuPage() {
                       {qcs.map(qc => {
                         const qty = values?.quantities[qc] ?? 0;
                         const options = line.racks[qc];
-                        const candidate = qc === "NORMAL" && options.length > 1 && Number(options[0].current_qty) > Number(options[1].current_qty) && Number(options[0].current_qty) > 0 ? options[0] : null;
+                        const positive = qc === "NORMAL" ? options.filter(r => Number(r.current_qty) > 0) : [];
+                        const candidate = positive[0] ?? null;
+                        const tied = positive.length > 1 && Number(positive[0].current_qty) === Number(positive[1].current_qty);
                         return <div className="grid min-w-0 gap-2 rounded-xl border border-slate-200 p-3 sm:grid-cols-[100px_90px_minmax(0,1fr)] sm:items-center" key={qc}>
                           <b className="text-sm">{qc}</b><span className="text-sm">{qty} pcs</span>
                           {qty > 0 ? <select required className={field} value={line.destinations[qc]} onChange={e => editRack(line.sku.variant_id, qc, e.target.value)}>
                             <option value="">Pilih rak {qc}</option>
                             {options.map(r => <option key={r.location_id} value={r.location_id}>{r.location_code} - {r.location_name} (stok {formatQty(r.current_qty)})</option>)}
                           </select> : <span className="text-xs text-slate-400">Tidak ada barang kategori ini</span>}
-                          {qc === "NORMAL" && qty > 0 && candidate && <p className="text-xs text-emerald-800 sm:col-span-3">Rekomendasi rak {candidate.location_code} (stok SKU {formatQty(candidate.current_qty)}). Pastikan kapasitas dan posisi fisik sesuai; pilihan dapat diganti.</p>}
-                          {qc === "NORMAL" && qty > 0 && line.rackTip?.recommendation_reason === "HISTORY" &&
-                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3">
+                          {qc === "NORMAL" && qty > 0 && candidate && <p className="text-xs text-emerald-800 sm:col-span-3"><b>Rekomendasi berdasarkan stok aktif:</b> {tied ? "Beberapa rak memiliki stok tertinggi yang sama. Pilih rak yang sesuai." : `Rak ${candidate.location_code} (stok SKU ${formatQty(candidate.current_qty)} pcs).`} Periksa kapasitas dan posisi fisik; pilihan dapat diganti.</p>}
+                          {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && (line.rackTip?.recommendation_reason === "HISTORY" || line.rackTip?.recommendation_reason === "IMPORT") &&
+                            <div className={"flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs sm:col-span-3 " + (line.rackTip.recommendation_reason === "IMPORT" ? "border-violet-200 bg-violet-50 text-violet-900" : "border-blue-200 bg-blue-50 text-blue-900")}>
                               <p className="min-w-0 flex-1">
-                                <b>Histori lokasi: rak {line.rackTip.location_code}</b> (stok SKU saat ini 0).
-                                {line.rackTip.last_used_at ? ` Terakhir masuk ${new Date(line.rackTip.last_used_at).toLocaleDateString("id-ID")}.` : ""}
+                                <b>{line.rackTip.recommendation_reason === "IMPORT" ? "Lokasi import awal" : "Histori lokasi"}: rak {line.rackTip.location_code}</b> (stok SKU saat ini 0).
+                                {line.rackTip.recommendation_reason === "IMPORT" ? " Tidak ada histori tujuan aktif yang dapat digunakan; saran berasal dari data import awal." : line.rackTip.last_used_at ? ` Terakhir masuk ${new Date(line.rackTip.last_used_at).toLocaleDateString("id-ID")}.` : ""}
                                 {line.rackTip.last_movement_no ? ` Movement #${line.rackTip.last_movement_no}.` : ""}
                                 {" "}Periksa posisi fisik dan kapasitas sebelum digunakan.
                               </p>
-                              {line.destinations.NORMAL !== line.rackTip.location_id &&
+                              {line.destinations.NORMAL !== line.rackTip.location_id ?
                                 <button type="button" className={secondary} disabled={busy || loading}
                                   onClick={() => editRack(line.sku.variant_id, "NORMAL", line.rackTip!.location_id)}>
                                   Gunakan rak {line.rackTip.location_code}
-                                </button>}
+                                </button> : <span className="font-semibold">Rak dipilih</span>}
                             </div>}
+                          {qc === "NORMAL" && qty > 0 && line.rackTipError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800 sm:col-span-3"><b>Gagal membaca rekomendasi rak.</b> Periksa koneksi atau tambahkan ulang SKU untuk mencoba kembali. Pilihan rak dari daftar tetap dapat digunakan setelah pemeriksaan fisik.</p>}
+                          {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && !line.rackTip && <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3"><b>Tidak ditemukan rekomendasi rak.</b> Tidak ada stok aktif, histori tujuan aktif, atau lokasi import yang cocok secara unik. Silakan pilih lokasi secara manual.</p>}
+                          {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && line.rackTip?.recommendation_reason === "CURRENT" && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3">Data stok berubah saat dibaca. Tambahkan ulang SKU untuk memuat lokasi terbaru.</p>}
                           {qty > 0 && options.length === 0 && <p className="text-xs text-red-700 sm:col-span-3">Tidak ada rak aktif untuk {qc}; hubungi Admin.</p>}
                         </div>;
                       })}
