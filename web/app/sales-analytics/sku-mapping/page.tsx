@@ -370,17 +370,17 @@ export default function SkuMappingPage() {
       <div className="flex min-h-screen max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 flex-1 overflow-x-hidden p-5 md:p-10">
+        <main data-hp-v6="sales" className="min-w-0 flex-1 overflow-x-hidden p-5 md:p-10">
           <div className="mx-auto w-full max-w-[1500px]">
 
-            <header className="mb-7">
+            <header data-hp-v6-hero="" className="mb-7">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
               <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="text-3xl font-bold">
+                  <h1 data-hp-v6-title="" className="text-3xl font-bold">
                     SKU Mapping Management
                   </h1>
                   <p className="mt-2 text-sm text-slate-500">
@@ -490,7 +490,7 @@ export default function SkuMappingPage() {
               <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
                   <div>
-                    <h2 className="font-bold">Daftar SKU iSeller</h2>
+                    <h2 data-hp-v6-section="" className="font-bold">Daftar SKU iSeller</h2>
                     <p className="mt-1 text-xs text-slate-500">
                       {filteredRows.length} SKU ditemukan
                     </p>
@@ -502,7 +502,7 @@ export default function SkuMappingPage() {
                 </div>
 
                 <div className="w-full overflow-x-auto">
-                  <table className="w-full min-w-[620px] text-left text-xs">
+                  <table data-hp-v6-table="" className="w-full min-w-[620px] text-left text-xs">
                     <thead className="bg-slate-50 text-slate-600">
                       <tr>
                         <th className="p-3">SKU iSeller</th>
@@ -609,7 +609,7 @@ export default function SkuMappingPage() {
               </section>
 
               <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 xl:sticky xl:top-5">
-                <h2 className="text-lg font-bold">
+                <h2 data-hp-v6-section="" className="text-lg font-bold">
                   Verifikasi SKU Mapping
                 </h2>
 

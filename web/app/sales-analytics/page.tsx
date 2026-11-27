@@ -924,14 +924,14 @@ export default function SalesAnalyticsPage() {
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="sales" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1400px]">
             <div className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
-              <h1 className="mt-2 text-3xl font-bold">
+              <h1 data-hp-v6-title="" className="mt-2 text-3xl font-bold">
                 Sales Analytics
               </h1>
 
@@ -962,7 +962,7 @@ export default function SalesAnalyticsPage() {
             )}
 
             <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold">
+              <h2 data-hp-v6-section="" className="text-lg font-semibold">
                 Import Excel iSeller
               </h2>
 
@@ -973,7 +973,7 @@ export default function SalesAnalyticsPage() {
 
               <div id="iseller-header-checklist" className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-bold">
+                  <h3 data-hp-v6-section="" className="text-sm font-bold">
                     18 Kolom Wajib iSeller
                   </h3>
                   <span className="rounded-lg bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
@@ -1059,7 +1059,7 @@ export default function SalesAnalyticsPage() {
                   }`}
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="font-bold">
+                    <h3 data-hp-v6-section="" className="font-bold">
                       Header {headerValidation.isValid ? "VALID" : "TIDAK VALID"}
                     </h3>
                     <p className="font-semibold">
@@ -1210,7 +1210,7 @@ export default function SalesAnalyticsPage() {
             <section className="w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 p-6">
                 <div>
-                  <h2 className="text-lg font-semibold">
+                  <h2 data-hp-v6-section="" className="text-lg font-semibold">
                     Riwayat Import
                   </h2>
 
@@ -1236,7 +1236,7 @@ export default function SalesAnalyticsPage() {
               </div>
 
               <div className="w-full overflow-x-auto">
-                <table className="w-full min-w-[780px] text-left text-sm">
+                <table data-hp-v6-table="" className="w-full min-w-[780px] text-left text-sm">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
                       <th className="p-4">Tanggal Import</th>

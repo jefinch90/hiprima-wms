@@ -72,8 +72,8 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+    <main data-hp-v6-auth="" className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+      <div data-hp-v6-auth-panel="" className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-8">
           <p className="text-sm font-medium text-slate-500">
             PT Prima Berkah Mulia
@@ -90,7 +90,7 @@ export default function ForgotPasswordPage() {
           </p>
         </div>
 
-        <form
+        <form data-hp-v6-auth-form=""
           onSubmit={handleSubmit}
           className="space-y-5"
         >

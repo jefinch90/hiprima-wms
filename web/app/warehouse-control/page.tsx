@@ -7,6 +7,9 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import IntegratedOpeningImport, {
+  type IntegratedBatch
+} from "./IntegratedOpeningImport";
 import { createClient } from "@/utils/supabase/client";
 
 type Warehouse = {
@@ -178,9 +181,8 @@ export default function WarehouseControlPage() {
   const [receiptSelection, setReceiptSelection] =
     useState<Record<string, string>>({});
 
-  const [file, setFile] = useState<File | null>(null);
-  const [fileDirty, setFileDirty] = useState(false);
-  const [confirmation, setConfirmation] = useState("");
+  const [integrated, setIntegrated] =
+    useState<IntegratedBatch | null>(null);
   const [liveConfirmation, setLiveConfirmation] = useState("");
 
   const rpc = useCallback(async (
@@ -197,6 +199,13 @@ export default function WarehouseControlPage() {
     const release = await rpc("wms_v46_release_status");
     setState(control);
     setVerified(release === "PASS");
+
+    if (["owner","admin"].includes(control.role)) {
+      const latest = await rpc("wms_v462_latest");
+      setIntegrated(latest as IntegratedBatch | null);
+    } else {
+      setIntegrated(null);
+    }
 
     if (control.role !== "viewer") {
       const docs = await rpc("wms_transfer_list");
@@ -480,195 +489,6 @@ export default function WarehouseControlPage() {
     });
   }
 
-  async function downloadTemplate() {
-    await run(async () => {
-      const { Workbook } = await import("exceljs");
-      const wb = new Workbook();
-
-      const master = wb.addWorksheet("Master Rak");
-
-      master.columns = [
-        { header: "Gudang", key: "warehouse", width: 18 },
-        { header: "Area", key: "area", width: 18 },
-        { header: "Kode Rak", key: "rack", width: 24 },
-        { header: "Nama Rak", key: "name", width: 35 }
-      ];
-
-      const stock = wb.addWorksheet("Opening Stock");
-
-      stock.columns = [
-        { header: "SKU", key: "sku", width: 35 },
-        { header: "Gudang", key: "warehouse", width: 18 },
-        { header: "Kode Rak", key: "rack", width: 24 },
-        { header: "Qty", key: "qty", width: 15 }
-      ];
-
-      for (const ws of [master, stock]) {
-        ws.getRow(1).font = { bold: true };
-        ws.views = [{ state: "frozen", ySplit: 1 }];
-      }
-
-      master.getColumn(3).numFmt = "@";
-      stock.getColumn(1).numFmt = "@";
-      stock.getColumn(3).numFmt = "@";
-
-      const guide = wb.addWorksheet("Petunjuk");
-      guide.getColumn(1).width = 95;
-      guide.addRows([
-        ["Hi.PRIMA WMS - Fresh Opening Stock"],
-        ["Gudang: UTAMA atau STORE"],
-        ["Area: NORMAL, DEFECT, REJECT"],
-        ["Gunakan kode rak baru, bukan kode historis."],
-        ["Kode rak harus unik dalam satu gudang."],
-        ["SKU harus sama persis dengan master SKU WMS."],
-        ["Satu SKU boleh berada di beberapa rak atau gudang."],
-        ["Satu kombinasi SKU + gudang + rak hanya satu baris."],
-        ["Qty bilangan bulat >= 0, tanpa rumus Excel."],
-        ["Import mengganti total saldo kedua gudang."],
-        ["Jangan mengisi data contoh pada file aktual."]
-      ]);
-
-      const buffer = await wb.xlsx.writeBuffer();
-      const bytes = new Uint8Array(buffer as ArrayBuffer);
-
-      const url = URL.createObjectURL(new Blob(
-        [bytes],
-        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
-      ));
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "HiPRIMA_Opening_Stock_Template.xlsx";
-      a.click();
-
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
-  }
-
-  async function previewOpening() {
-    await run(async () => {
-      if (!file || !prep || !admin) return;
-
-      if (
-        !file.name.toLowerCase().endsWith(".xlsx") ||
-        file.size > 10 * 1024 * 1024
-      ) throw Error("Gunakan XLSX maksimal 10 MB.");
-
-      const { Workbook } = await import("exceljs");
-      const wb = new Workbook();
-      await wb.xlsx.load(await file.arrayBuffer());
-
-      const master = wb.getWorksheet("Master Rak");
-      const stock = wb.getWorksheet("Opening Stock");
-
-      if (!master || !stock) {
-        throw Error("Sheet Master Rak dan Opening Stock wajib ada.");
-      }
-
-      function rows(
-        ws: typeof master,
-        headers: string[]
-      ): string[][] {
-        if (!ws) throw Error("Sheet tidak ditemukan.");
-
-        const actual = headers.map((_, i) =>
-          ws.getRow(1).getCell(i + 1).text.trim()
-        );
-
-        if (actual.some((v, i) => v !== headers[i])) {
-          throw Error("Header tidak sesuai: " + ws.name);
-        }
-
-        const result: string[][] = [];
-
-        ws.eachRow((row, index) => {
-          if (index === 1) return;
-
-          const values = headers.map((_, i) => {
-            const cell = row.getCell(i + 1);
-
-            if (cell.formula) {
-              throw Error(
-                ws.name + " baris " + index + ": rumus tidak diizinkan."
-              );
-            }
-
-            return cell.text.trim();
-          });
-
-          if (values.some(Boolean)) result.push(values);
-        });
-
-        return result;
-      }
-
-      const rackRows = rows(master, [
-        "Gudang", "Area", "Kode Rak", "Nama Rak"
-      ]).map(r => ({
-        warehouse: r[0].toUpperCase(),
-        area: r[1].toUpperCase(),
-        rack: r[2].toUpperCase(),
-        name: r[3]
-      }));
-
-      const stockRows = rows(stock, [
-        "SKU", "Gudang", "Kode Rak", "Qty"
-      ]).map((r, i) => {
-        if (
-          !/^\d+$/.test(r[3]) ||
-          !Number.isSafeInteger(Number(r[3])) ||
-          Number(r[3]) > 999999999
-        ) throw Error("Qty tidak valid pada data baris " + (i + 1));
-
-        return {
-          sku: r[0],
-          warehouse: r[1].toUpperCase(),
-          rack: r[2].toUpperCase(),
-          qty: Number(r[3])
-        };
-      });
-
-      await rpc("wms_preview_opening", {
-        p_racks: rackRows,
-        p_stock: stockRows
-      });
-
-      setFileDirty(false);
-      setConfirmation("");
-      setMessage("Preview valid. Stok asli belum berubah.");
-      await refresh();
-    });
-  }
-
-  async function applyOpening() {
-    await run(async () => {
-      const batch = state?.latest_batch;
-
-      if (
-        !owner || !prep || !batch ||
-        batch.status !== "DRAFT" ||
-        fileDirty || confirmation !== "GANTI STOK"
-      ) return;
-
-      if (state.open_opnames > 0) {
-        throw Error("Stock Opname lama belum ditutup.");
-      }
-
-      if (!window.confirm(
-        "PERHATIAN: seluruh saldo stok lama akan diganti. Lanjutkan?"
-      )) return;
-
-      await rpc("wms_apply_opening", {
-        p_batch_id: batch.batch_id,
-        p_confirmation: confirmation
-      });
-
-      setConfirmation("");
-      setMessage("Opening Stock berhasil. Status READY.");
-      await refresh();
-    });
-  }
-
   async function cancelOpnames() {
     await run(async () => {
       if (!owner || !prep || !selectedOpnames.length) return;
@@ -695,6 +515,7 @@ export default function WarehouseControlPage() {
       if (
         !owner || !verified ||
         state?.phase !== "READY" ||
+        integrated?.status !== "APPLIED" ||
         liveConfirmation !== "GO LIVE"
       ) return;
 
@@ -713,7 +534,7 @@ export default function WarehouseControlPage() {
   }
 
   const batch = state?.latest_batch;
-  const preview = batch?.preview;
+
   const visibleTabs = tabs.filter(([id]) =>
     id === "overview" ||
     (id === "transfer" && state?.role !== "viewer") ||
@@ -721,7 +542,7 @@ export default function WarehouseControlPage() {
   );
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-slate-50 text-slate-900">
+    <div className="hiprima-wcc min-h-screen w-full overflow-x-hidden bg-slate-50 text-slate-900">
       <div className="flex min-h-screen w-full">
         <Sidebar />
 
@@ -795,7 +616,7 @@ export default function WarehouseControlPage() {
 
                 <nav className="flex flex-wrap gap-2">
                   {visibleTabs.map(([id, label]) => (
-                    <button key={id} type="button"
+                    <button key={id} type="button" data-hp-tab={id}
                       disabled={busy}
                       className={tab === id ? btn : secondary}
                       onClick={() => setTab(id)}>
@@ -833,7 +654,7 @@ export default function WarehouseControlPage() {
                       {[
                         ["Backend Final Regression", verified],
                         ["Stock Opname lama ditutup", state.open_opnames === 0],
-                        ["Opening Stock Applied", batch?.status === "APPLIED" || live],
+                        ["Integrated Opening Applied", (admin ? integrated?.status === "APPLIED" : batch?.status === "APPLIED") || live],
                         ["Dua gudang aktif", activeWarehouses.length === 2],
                         ["Owner Go Live Approval", live]
                       ].map(([label, done]) => (
@@ -1069,105 +890,19 @@ export default function WarehouseControlPage() {
                 )}
 
                 {tab === "import" && admin && (
-                  <>
-                    <section className={panel}>
-                      <h2 className="font-bold">Fresh Opening Stock Import</h2>
-                      <p className="my-3 text-sm text-amber-800">
-                        REPLACE STOCK: seluruh saldo kedua gudang akan diganti,
-                        bukan ditambahkan.
-                      </p>
-
-                      <button className={secondary} disabled={busy}
-                        onClick={() => void downloadTemplate()}>
-                        Download Template Excel
-                      </button>
-
-                      <input type="file" accept=".xlsx"
-                        disabled={!prep || busy}
-                        className={field + " mt-4"}
-                        onChange={e => {
-                          setFile(e.target.files?.[0] ?? null);
-                          setFileDirty(true);
-                          setConfirmation("");
-                        }} />
-
-                      <button className={btn + " mt-3"}
-                        disabled={!prep || busy || !file}
-                        onClick={() => void previewOpening()}>
-                        Preview & Validation
-                      </button>
-                    </section>
-
-                    {preview && (
-                      <section className={panel}>
-                        <h2 className="font-bold">Opening Stock Preview</h2>
-                        <p className="mt-2 text-sm">Batch: {batch?.status}</p>
-
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-xl bg-slate-100 p-3">
-                            <p className="text-sm">Stok Lama</p>
-                            <p className="text-2xl font-bold">{fmt(preview.old_total)}</p>
-                          </div>
-                          <div className="rounded-xl bg-blue-50 p-3">
-                            <p className="text-sm">Stok Baru</p>
-                            <p className="text-2xl font-bold">{fmt(preview.new_total)}</p>
-                          </div>
-                        </div>
-
-                        <p className="mt-4 text-sm">
-                          {fmt(preview.new_racks)} rak / {fmt(preview.new_skus)} SKU
-                          / {fmt(preview.new_rows)} baris
-                        </p>
-
-                        <div className="mt-3 overflow-x-auto">
-                          <table className="w-full text-left text-sm">
-                            <thead><tr>
-                              <th className="p-2">Gudang</th>
-                              <th className="p-2">Area</th>
-                              <th className="p-2">Rak</th>
-                              <th className="p-2">Qty</th>
-                            </tr></thead>
-                            <tbody>
-                              {preview.summary.map(row => (
-                                <tr key={row.warehouse + row.area} className="border-t">
-                                  <td className="p-2">{row.warehouse}</td>
-                                  <td className="p-2">{row.area}</td>
-                                  <td className="p-2">{fmt(row.racks)}</td>
-                                  <td className="p-2">{fmt(row.qty)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {owner && prep && batch?.status === "DRAFT" && (
-                          <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
-                            <p className="text-sm font-semibold text-red-800">
-                              Persetujuan Penggantian Seluruh Stok
-                            </p>
-                            {state.open_opnames > 0 && (
-                              <p className="mt-2 text-sm">
-                                Tutup {state.open_opnames} sesi Stock Opname dahulu.
-                              </p>
-                            )}
-                            <input className={field + " mt-3"}
-                              placeholder="Ketik GANTI STOK"
-                              value={confirmation}
-                              onChange={e => setConfirmation(e.target.value)} />
-                            <button className="mt-3 rounded-xl bg-red-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
-                              disabled={busy || fileDirty ||
-                                state.open_opnames > 0 ||
-                                confirmation !== "GANTI STOK"}
-                              onClick={() => void applyOpening()}>
-                              Approve & Replace Opening Stock
-                            </button>
-                          </div>
-                        )}
-                      </section>
-                    )}
-                  </>
+                  <IntegratedOpeningImport
+                    owner={owner}
+                    prep={prep}
+                    busy={busy}
+                    openOpnames={state.open_opnames}
+                    inTransit={state.in_transit}
+                    batch={integrated}
+                    setBatch={setIntegrated}
+                    rpc={rpc}
+                    run={run}
+                    refresh={refresh}
+                  />
                 )}
-
                 {tab === "opname" && admin && (
                   <section className={panel}>
                     <h2 className="font-bold">Review Stock Opname Lama</h2>
@@ -1226,7 +961,7 @@ export default function WarehouseControlPage() {
                       sistem telah di-deploy dan staf siap bekerja.
                     </p>
 
-                    {owner && state.phase === "READY" && verified && (
+                    {owner && state.phase === "READY" && verified && integrated?.status === "APPLIED" && (
                       <>
                         <input className={field}
                           placeholder="Ketik GO LIVE"

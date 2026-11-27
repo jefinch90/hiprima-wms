@@ -848,10 +848,9 @@ export default function ProductionOperationsPage() {
         </summary>
         <div className="mt-4 space-y-4">
           <div>
-            <h2 className="text-lg font-bold">Harga vendor untuk Draft terpilih</h2>
+            <h2 className="text-lg font-bold">Harga standar otomatis</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Harga standar otomatis dari HPP Master yang valid, atau harga vendor terakhir yang disetujui.
-              Ajukan perubahan hanya jika harga berubah atau perlu diperbarui.
+              Harga HPP Master valid dipakai otomatis. Jika harga vendor berbeda, ajukan perubahan dengan bukti dan verifikasi.
             </p>
           </div>
 

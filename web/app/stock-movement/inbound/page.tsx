@@ -268,14 +268,14 @@ function ScopedPage({
     <div className="min-h-screen w-full overflow-x-hidden bg-slate-50 text-slate-900">
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-8">
+        <main data-hp-v6="stock-movement" data-hp-v4-main="" className="min-w-0 flex-1 overflow-x-hidden p-4 md:p-8">
           <div className="mx-auto max-w-[1200px] space-y-5">
             <header className="flex flex-wrap items-end justify-between gap-4">
-              <div><p className="text-sm text-slate-500">PT Prima Berkah Mulia</p>
-                <h1 className="mt-1 text-3xl font-bold">Inbound Multi-SKU</h1>
+              <div data-hp-v4-heading=""><p className="text-sm text-slate-500">PT Prima Berkah Mulia</p>
+                <h1 data-hp-v6-title="" data-hp-v4-title="" className="mt-1 text-3xl font-bold">Inbound Multi-SKU</h1>
                 <p className="mt-2 text-sm text-slate-600">Satu vendor + Surat Jalan, banyak SKU, satu konfirmasi.</p>
               </div>
-              <Link href="/stock-movement" className={secondary}>Kembali ke Movement</Link>
+              <Link data-hp-v4-link="transfer" href="/stock-movement" className={secondary}>Kembali ke Movement</Link>
             </header>
 {renderWarehousePicker(busy || loading || !!posted || lines.length > 0)}
             {!backendReady && <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -284,7 +284,7 @@ function ScopedPage({
             {errorText && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-800">{errorText}</div>}
 
             {posted ? <section className="rounded-2xl border border-emerald-300 bg-emerald-50 p-5">
-              <h2 className="text-xl font-bold text-emerald-900">Dokumen Inbound berhasil dicatat</h2>
+              <h2 data-hp-v6-section="" className="text-xl font-bold text-emerald-900">Dokumen Inbound berhasil dicatat</h2>
               <p className="mt-2 text-sm">Penerimaan <b>{posted.receipt_no}</b> · {formatQty(posted.line_count)} SKU · {formatQty(posted.total_qty)} pcs</p>
               <div className="mt-3 space-y-2">{posted.lines.map(l =>
                 <div className="rounded-xl bg-white p-3 text-sm" key={l.variant_id}><b>{l.sku}</b> — {formatQty(l.total_qty)} pcs
@@ -292,9 +292,9 @@ function ScopedPage({
                 </div>
               )}</div>
               <button type="button" onClick={reset} className="mt-4 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white">Dokumen Berikutnya</button>
-            </section> : <form onSubmit={submit} className="space-y-5">
+            </section> : <form data-hp-v6-form="" onSubmit={submit} className="space-y-5">
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="font-bold">1. Dokumen penerimaan</h2>
+                <h2 data-hp-v6-section="" className="font-bold">1. Dokumen penerimaan</h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <label className="text-sm font-medium">Vendor (wajib)
                     <select className={field + " mt-2"} value={vendorId} required onChange={e => {setVendorId(e.target.value);invalidate();}}>
@@ -319,7 +319,7 @@ function ScopedPage({
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="font-bold">2. Tambahkan SKU / varian</h2>
+                <h2 data-hp-v6-section="" className="font-bold">2. Tambahkan SKU / varian</h2>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <input className={field + " flex-1"} value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari SKU atau nama produk" />
                   <button type="button" className="shrink-0 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50" onClick={() => void searchSku()} disabled={loading || busy}>Cari</button>
@@ -335,7 +335,7 @@ function ScopedPage({
               </section>
 
               <section className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-bold">3. QC dan rak per SKU</h2><span className="text-sm text-slate-600">{lines.length} SKU</span></div>
+                <div className="flex flex-wrap items-center justify-between gap-2"><h2 data-hp-v6-section="" className="font-bold">3. QC dan rak per SKU</h2><span className="text-sm text-slate-600">{lines.length} SKU</span></div>
                 {lines.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">Belum ada SKU. Cari dan tambahkan varian sesuai Surat Jalan.</p>}
                 {lines.map((line, idx) => {
                   const values = parsed(line);
@@ -392,7 +392,7 @@ function ScopedPage({
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="font-bold">4. Review dan konfirmasi dokumen</h2>
+                <h2 data-hp-v6-section="" className="font-bold">4. Review dan konfirmasi dokumen</h2>
                 <p className="mt-2 text-sm text-slate-700"><b>{lines.length} SKU</b> · <b>{formatQty(totalPcs)} pcs</b> · {vendorName || "Vendor belum dipilih"} · {sj.trim() || "Surat Jalan belum diisi"}</p>
                 <p className="mt-2 text-xs text-slate-500">Seluruh SKU diproses atomik. Jika satu baris gagal, semua stok dan movement dibatalkan. Setelah POSTED, dokumen tidak dapat ditambah diam-diam.</p>
                 <div className="mt-4 flex flex-wrap gap-2">

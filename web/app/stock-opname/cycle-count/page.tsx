@@ -456,7 +456,7 @@ function ScopedPage({
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 lg:h-dvh lg:overflow-hidden lg:p-6 lg:pb-6">
+        <main data-hp-v6="stock-opname" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 lg:h-dvh lg:overflow-hidden lg:p-6 lg:pb-6">
           <div className="mx-auto w-full min-w-0 max-w-[1300px] lg:flex lg:h-full lg:flex-col">
             <header className="mb-6 shrink-0 lg:mb-4">
               <p className="text-sm text-slate-500">
@@ -464,8 +464,8 @@ function ScopedPage({
               </p>
 
               <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h1 className="text-2xl font-bold sm:text-3xl">
+                <div data-hp-v4-heading="">
+                  <h1 data-hp-v6-title="" data-hp-v4-title="" className="text-2xl font-bold sm:text-3xl">
                     New Cycle Count
                   </h1>
 
@@ -475,7 +475,7 @@ function ScopedPage({
                   </p>
                 </div>
 
-                <Link
+                <Link data-hp-v4-link="opname"
                   href="/stock-opname"
                   className="shrink-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
                 >
@@ -491,7 +491,7 @@ function ScopedPage({
               </div>
             )}
 
-            <form
+            <form data-hp-v6-form=""
               onSubmit={handleSubmit}
               className="min-h-0 lg:flex lg:flex-1 lg:flex-col"
             >
@@ -630,7 +630,7 @@ function ScopedPage({
                 ) : (
                   <>
                     <div className="hidden max-h-[52vh] overflow-auto md:block lg:min-h-0 lg:max-h-none lg:flex-1">
-                      <table className="w-full min-w-[800px] text-left text-sm">
+                      <table data-hp-v6-table="" className="w-full min-w-[800px] text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
                           <tr>
                             <th className="w-16 px-5 py-4">

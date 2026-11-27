@@ -1049,7 +1049,7 @@ export default function InventoryPage() {
         <Sidebar />
 
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="inventory" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
 
           <div className="mx-auto w-full min-w-0 max-w-[1600px]">
 
@@ -1058,14 +1058,14 @@ export default function InventoryPage() {
             {/* HEADER */}
             {/* ================================================= */}
 
-            <header className="mb-8">
+            <header data-hp-v4-heading="" className="mb-8">
 
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
 
-              <h1 className="mt-1 text-3xl font-bold">
+              <h1 data-hp-v6-title="" data-hp-v4-title="" className="mt-1 text-3xl font-bold">
                 Inventory
               </h1>
 
@@ -1142,9 +1142,9 @@ export default function InventoryPage() {
 
               {/* TOTAL STOCK */}
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div data-hp-kpi="total" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                <p className="text-sm font-medium text-slate-500">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Total Stock
                 </p>
 
@@ -1163,9 +1163,9 @@ export default function InventoryPage() {
 
               {/* NORMAL */}
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div data-hp-kpi="normal" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                <p className="text-sm font-medium text-slate-500">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Normal
                 </p>
 
@@ -1184,9 +1184,9 @@ export default function InventoryPage() {
 
               {/* DEFECT */}
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div data-hp-kpi="defect" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                <p className="text-sm font-medium text-slate-500">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Defect
                 </p>
 
@@ -1205,9 +1205,9 @@ export default function InventoryPage() {
 
               {/* REJECT */}
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div data-hp-kpi="reject" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                <p className="text-sm font-medium text-slate-500">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Reject
                 </p>
 
@@ -1235,7 +1235,7 @@ export default function InventoryPage() {
 
               <div className="mb-4">
 
-                <h2 className="text-lg font-semibold">
+                <h2 data-hp-v6-section="" className="text-lg font-semibold">
                   Inventory Valuation
                 </h2>
 
@@ -1251,9 +1251,9 @@ export default function InventoryPage() {
 
                 {/* TOTAL */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="value" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Total Inventory Value
                   </p>
 
@@ -1272,9 +1272,9 @@ export default function InventoryPage() {
 
                 {/* NORMAL */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="normal" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Normal
                   </p>
 
@@ -1293,9 +1293,9 @@ export default function InventoryPage() {
 
                 {/* DEFECT */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="defect" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Defect
                   </p>
 
@@ -1314,9 +1314,9 @@ export default function InventoryPage() {
 
                 {/* REJECT */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="reject" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Reject
                   </p>
 
@@ -1346,7 +1346,7 @@ export default function InventoryPage() {
 
               <div className="mb-4">
 
-                <h2 className="text-lg font-semibold">
+                <h2 data-hp-v6-section="" className="text-lg font-semibold">
                   Potential Sales & Profit
                 </h2>
 
@@ -1362,9 +1362,9 @@ export default function InventoryPage() {
 
                 {/* SALES */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="sales" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Potential Sales Value
                   </p>
 
@@ -1383,9 +1383,9 @@ export default function InventoryPage() {
 
                 {/* GP */}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div data-hp-kpi="profit" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                  <p className="text-sm font-medium text-slate-500">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Potential Gross Profit
                   </p>
 
@@ -1433,7 +1433,7 @@ export default function InventoryPage() {
 
             <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
-              <form
+              <form data-hp-v6-form=""
                 onSubmit={
                   handleSearch
                 }
@@ -1495,7 +1495,7 @@ export default function InventoryPage() {
 
                 <div>
 
-                  <h2 className="text-lg font-semibold">
+                  <h2 data-hp-v6-section="" className="text-lg font-semibold">
                     Inventory List
                   </h2>
 
@@ -1529,7 +1529,7 @@ export default function InventoryPage() {
 
               <div className="w-full max-w-full overflow-x-auto">
 
-                <table className="w-full min-w-[1900px] text-left text-sm">
+                <table data-hp-v6-table="" className="w-full min-w-[1900px] text-left text-sm">
 
                   <thead className="bg-slate-50 text-slate-500">
 

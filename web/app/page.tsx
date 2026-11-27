@@ -265,7 +265,7 @@ export default function Home() {
           <div className="mx-auto w-full min-w-0 max-w-[1400px]">
 
             {/* HEADER */}
-            <header className="mb-8">
+            <header data-hp-hero="dashboard" className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
@@ -289,8 +289,8 @@ export default function Home() {
             {/* STOCK SUMMARY */}
             <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
+              <div data-hp-kpi="total" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Total Stock
                 </p>
 
@@ -303,8 +303,8 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
+              <div data-hp-kpi="normal" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Normal
                 </p>
 
@@ -317,8 +317,8 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
+              <div data-hp-kpi="defect" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Defect
                 </p>
 
@@ -331,8 +331,8 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">
+              <div data-hp-kpi="reject" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                   Reject
                 </p>
 
@@ -346,6 +346,114 @@ export default function Home() {
               </div>
 
             </section>
+            {/* HIPRIMA V3 STOCK QUALITY CHART */}
+            {!loading && !errorMessage && (
+              <section className="hp-stock-quality mb-8">
+                <div className="hp-quality-heading">
+                  <div>
+                    <p className="hp-eyebrow">
+                      INVENTORY HEALTH
+                    </p>
+                    <h2>Stock Quality Composition</h2>
+                    <p>
+                      Distribusi stok berdasarkan kondisi QC
+                    </p>
+                  </div>
+                  <span className="hp-live-chip">
+                    Live Inventory
+                  </span>
+                </div>
+
+                <div className="hp-quality-body">
+                  <div
+                    className="hp-quality-donut"
+                    role="img"
+                    aria-label={
+                      "Komposisi stok: Normal "+
+                      formatNumber(normalStock)+
+                      ", Defect "+
+                      formatNumber(defectStock)+
+                      ", Reject "+
+                      formatNumber(rejectStock)
+                    }
+                    style={{
+                      background: totalStock > 0
+                        ? "conic-gradient(#0d9488 0% "+
+                          (normalStock/totalStock*100)+
+                          "%, #f59e0b "+
+                          (normalStock/totalStock*100)+
+                          "% "+
+                          ((normalStock+defectStock)/
+                            totalStock*100)+
+                          "%, #dc4664 "+
+                          ((normalStock+defectStock)/
+                            totalStock*100)+
+                          "% 100%)"
+                        : "#e5e7eb"
+                    }}
+                  >
+                    <div className="hp-donut-center">
+                      <strong>
+                        {totalStock > 0
+                          ? (normalStock/totalStock*100)
+                            .toLocaleString("id-ID",{
+                              maximumFractionDigits:1
+                            })+"%"
+                          : "-"}
+                      </strong>
+                      <span>Normal Stock</span>
+                    </div>
+                  </div>
+
+                  <div className="hp-quality-legend">
+                    {[
+                      {
+                        label:"Normal",
+                        value:normalStock,
+                        color:"#0d9488"
+                      },
+                      {
+                        label:"Defect",
+                        value:defectStock,
+                        color:"#f59e0b"
+                      },
+                      {
+                        label:"Reject",
+                        value:rejectStock,
+                        color:"#dc4664"
+                      }
+                    ].map(item=>(
+                      <div
+                        key={item.label}
+                        className="hp-quality-row"
+                      >
+                        <span
+                          className="hp-quality-dot"
+                          style={{
+                            backgroundColor:item.color
+                          }}
+                        />
+                        <div className="hp-quality-name">
+                          <strong>{item.label}</strong>
+                          <small>
+                            {totalStock > 0
+                              ? (item.value/totalStock*100)
+                                .toLocaleString("id-ID",{
+                                  maximumFractionDigits:2
+                                })+"%"
+                              : "0%"}
+                          </small>
+                        </div>
+                        <strong>
+                          {formatNumber(item.value)} pcs
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
 
             {/* WAREHOUSE SUMMARY */}
             <section className="mb-8">
@@ -358,8 +466,8 @@ export default function Home() {
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="products" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Products
                   </p>
 
@@ -368,8 +476,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="sku" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     SKU / Variants
                   </p>
 
@@ -378,8 +486,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="warehouse" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Warehouse
                   </p>
 
@@ -388,8 +496,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="areas" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Stock Areas
                   </p>
 
@@ -416,8 +524,8 @@ export default function Home() {
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="value" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Inventory Value (HPP)
                   </p>
 
@@ -430,8 +538,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="normal" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Normal
                   </p>
 
@@ -444,8 +552,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="defect" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Defect
                   </p>
 
@@ -458,8 +566,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="reject" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Nilai HPP Reject
                   </p>
 
@@ -490,8 +598,8 @@ export default function Home() {
 
               <div className="grid gap-4 sm:grid-cols-3">
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="sales" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Potential Sales Value
                   </p>
 
@@ -504,8 +612,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="profit" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Potential Gross Profit
                   </p>
 
@@ -518,8 +626,8 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <p className="text-sm font-medium text-slate-500">
+                <div data-hp-kpi="margin" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <p data-hp-kpi-label="" className="text-sm font-medium text-slate-500">
                     Margin
                   </p>
 

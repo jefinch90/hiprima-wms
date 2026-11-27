@@ -1818,17 +1818,17 @@ export default function ProductsPage() {
 
 
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="products" data-hp-v4-main="" data-hp-polish="products" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
 
           <div className="mx-auto w-full min-w-0 max-w-[1600px]">
 
             <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
 
-              <div className="min-w-0">
+              <div data-hp-v4-heading="" className="min-w-0">
 
                 <p className="text-sm text-slate-500">PT Prima Berkah Mulia</p>
 
-                <h1 className="mt-1 text-3xl font-bold">Master Produk</h1>
+                <h1 data-hp-v6-title="" data-hp-v4-title="" className="mt-1 text-3xl font-bold">Master Produk</h1>
 
                 <p className="mt-2 text-sm text-slate-500">Master produk, SKU, lifecycle, harga, dan stok Hi.PRIMA.</p>
 
@@ -2020,7 +2020,7 @@ export default function ProductsPage() {
 
                   <div className="mb-4">
 
-                    <h3 className="font-semibold">Lifecycle & System Information</h3>
+                    <h3 data-hp-v6-section="" className="font-semibold">Lifecycle & System Information</h3>
 
                     <p className="text-sm text-slate-500">Informasi lifecycle dan tanggal yang terbentuk dari aktivitas WMS.</p>
 
@@ -2057,7 +2057,7 @@ export default function ProductsPage() {
                       <>
                         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <h3 className="font-semibold">Riwayat Harga & HPP</h3>
+                            <h3 data-hp-v6-section="" className="font-semibold">Riwayat Harga & HPP</h3>
                             <p className="text-sm text-slate-500">
                               Hanya perubahan harga/HPP yang ditampilkan. Baseline tetap tersimpan di sistem.
                             </p>
@@ -2080,7 +2080,7 @@ export default function ProductsPage() {
                                     </div>
                                   </div>
                                   <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
-                                    <table className="w-full min-w-[620px] text-left text-xs">
+                                    <table data-hp-v6-table="" className="w-full min-w-[620px] text-left text-xs">
                                       <thead className="bg-slate-50 text-slate-500">
                                         <tr>
                                           <th className="px-3 py-2">SKU / Variant</th>
@@ -2125,7 +2125,7 @@ export default function ProductsPage() {
                           </div>
                         ) : (
                           <div className="w-full max-w-full overflow-x-auto rounded-xl border border-slate-200">
-                            <table className="w-full min-w-[900px] text-left text-sm">
+                            <table data-hp-v6-table="" className="w-full min-w-[900px] text-left text-sm">
                               <thead className="bg-slate-50 text-slate-500">
                                 <tr>
                                   <th className="px-4 py-3">Tanggal</th>
@@ -2195,7 +2195,7 @@ export default function ProductsPage() {
 
                 <div className="w-full max-w-full overflow-x-auto">
 
-                  <table className="w-full min-w-[1400px] text-left text-sm">
+                  <table data-hp-v6-table="" className="w-full min-w-[1400px] text-left text-sm">
 
                     <thead className="bg-slate-50 text-slate-500">
 
@@ -2283,7 +2283,7 @@ export default function ProductsPage() {
 
             <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
-              <form onSubmit={handleSearch} className="flex w-full min-w-0 flex-col gap-3 lg:flex-row">
+              <form data-hp-v6-form="" onSubmit={handleSearch} className="flex w-full min-w-0 flex-col gap-3 lg:flex-row">
 
                 <input name="q" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Cari kode produk, nama produk, atau brand..." className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500" />
 
@@ -2301,7 +2301,7 @@ export default function ProductsPage() {
 
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
 
-                <div><h2 className="text-lg font-semibold">Product List</h2><p className="text-sm text-slate-500">{formatNumber(totalCount)} produk ditemukan</p></div>
+                <div><h2 data-hp-v6-section="" className="text-lg font-semibold">Product List</h2><p className="text-sm text-slate-500">{formatNumber(totalCount)} produk ditemukan</p></div>
 
                 <div className="shrink-0 text-sm text-slate-500">Page {currentPage} of {totalPages}</div>
 
@@ -2311,7 +2311,7 @@ export default function ProductsPage() {
 
               <div className="w-full max-w-full overflow-x-auto">
 
-                <table className="w-full min-w-[800px] text-left text-sm">
+                <table data-hp-v6-table="" className="w-full min-w-[800px] text-left text-sm">
 
                   <thead className="bg-slate-50 text-slate-500"><tr><th className="px-5 py-4">Product</th><th className="px-5 py-4">Brand</th><th className="px-5 py-4 text-right">Variants</th><th className="px-5 py-4 text-right">Stock</th><th className="px-5 py-4"></th></tr></thead>
 

@@ -183,14 +183,14 @@ export default function StockOpnamePage() {
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v4-main="" data-hp-polish="opname" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
-            <header className="mb-8">
+            <header data-hp-v4-heading="" className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
-              <h1 className="mt-1 text-3xl font-bold">
+              <h1 data-hp-v4-title="" className="mt-1 text-3xl font-bold">
                 Stock Opname
               </h1>
 
@@ -200,68 +200,83 @@ export default function StockOpnamePage() {
               </p>
             </header>
 
-            <section className="mb-8 grid gap-5 lg:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Daily Control
-                </div>
+            <section className="hp-opname-exact-grid mb-8">
 
-                <h2 className="mt-2 text-xl font-bold">
-                  Cycle Count
-                </h2>
+  <article className="hp-opname-exact-card hp-opname-cycle">
 
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Hitung stok fisik untuk
-                  rack tertentu secara rutin
-                  tanpa melakukan full opname
-                  seluruh gudang.
-                </p>
+    <div className="hp-opname-exact-icon">
+      <svg aria-hidden="true" width="26" height="26"
+        viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 8a8 8 0 0 0-14-3L3 8"/>
+        <path d="M3 3v5h5"/>
+        <path d="M4 16a8 8 0 0 0 14 3l3-3"/>
+        <path d="M21 21v-5h-5"/>
+      </svg>
+    </div>
 
-                <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                  Cocok untuk pengecekan
-                  harian per rack / area.
-                </div>
+    <div className="hp-opname-exact-label">
+      DAILY CONTROL
+    </div>
 
-                {canCreate && (
-                  <Link
-                    href="/stock-opname/cycle-count"
-                    className="mt-5 inline-flex rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
-                  >
-                    Buat Cycle Count
-                  </Link>
-                )}
-              </div>
+    <h2 className="hp-opname-exact-title">
+      Cycle Count
+    </h2>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Periodic Control
-                </div>
+    <p className="hp-opname-exact-desc">
+      Penghitungan stok fisik harian berdasarkan rak dan area.
+    </p>
 
-                <h2 className="mt-2 text-xl font-bold">
-                  Full Stock Opname
-                </h2>
+    {canCreate && (
+      <Link
+        href="/stock-opname/cycle-count"
+        className="hp-opname-exact-button"
+      >
+        Buat Cycle Count
+      </Link>
+    )}
 
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Mengambil snapshot seluruh
-                  rack aktif dan menghitung
-                  seluruh stok fisik gudang.
-                </p>
+  </article>
 
-                <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                  Rencana Hi.PRIMA:
-                  sekitar setiap 6 bulan.
-                </div>
+  <article className="hp-opname-exact-card hp-opname-full">
 
-                {canCreateFull && (
-                  <Link
-                    href="/stock-opname/full"
-                    className="mt-5 inline-flex rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
-                  >
-                    Buat Full Opname
-                  </Link>
-                )}
-              </div>
-            </section>
+    <div className="hp-opname-exact-icon">
+      <svg aria-hidden="true" width="26" height="26"
+        viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="5" width="14" height="16" rx="2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"
+          fill="white"/>
+        <path d="m9 14 2 2 4-5"/>
+      </svg>
+    </div>
+
+    <div className="hp-opname-exact-label">
+      PERIODIC CONTROL
+    </div>
+
+    <h2 className="hp-opname-exact-title">
+      Full Stock Opname
+    </h2>
+
+    <p className="hp-opname-exact-desc">
+      Penghitungan menyeluruh terhadap stok fisik gudang.
+    </p>
+
+    {canCreateFull && (
+      <Link
+        href="/stock-opname/full"
+        className="hp-opname-exact-button"
+      >
+        Buat Full Opname
+      </Link>
+    )}
+
+  </article>
+
+</section>
 
             {!canCreate &&
               role && (

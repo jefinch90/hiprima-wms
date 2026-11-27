@@ -164,15 +164,15 @@ export default function LocationsPage() {
 
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="locations" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
 
-            <header className="mb-8">
+            <header data-hp-v4-heading="" className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
-              <h1 className="mt-1 text-3xl font-bold">
+              <h1 data-hp-v6-title="" data-hp-v4-title="" className="mt-1 text-3xl font-bold">
                 Locations
               </h1>
 
@@ -263,7 +263,7 @@ export default function LocationsPage() {
                   </div>
                 ) : (
                   <div className="w-full max-w-full overflow-x-auto border-t border-slate-200">
-                    <table className="w-full min-w-[850px] text-left text-sm">
+                    <table data-hp-v6-table="" className="w-full min-w-[850px] text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500">
                         <tr>
                           <th className="px-5 py-4">SKU</th>
@@ -319,7 +319,7 @@ export default function LocationsPage() {
             )}
 
             <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <form
+              <form data-hp-v6-form=""
                 onSubmit={handleSearch}
                 className="flex flex-col gap-3 lg:flex-row"
               >
@@ -353,7 +353,7 @@ export default function LocationsPage() {
 
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">
+                  <h2 data-hp-v6-section="" className="text-lg font-semibold">
                     Location List
                   </h2>
 
@@ -373,7 +373,7 @@ export default function LocationsPage() {
                 </div>
               ) : (
                 <div className="w-full max-w-full overflow-x-auto">
-                  <table className="w-full min-w-[850px] text-left text-sm">
+                  <table data-hp-v6-table="" className="w-full min-w-[850px] text-left text-sm">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
                         <th className="px-5 py-4">Location</th>

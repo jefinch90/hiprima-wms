@@ -2302,7 +2302,7 @@ export default function StockOpnameCountingPage() {
 
 
 
-          <main className="flex-1 p-6 md:p-10">
+          <main data-hp-v6="stock-opname" data-hp-v4-main="" className="flex-1 p-6 md:p-10">
 
             <div className="mx-auto max-w-[1500px] rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
 
@@ -2332,7 +2332,7 @@ export default function StockOpnameCountingPage() {
 
 
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 md:p-10 md:pb-28">
+        <main data-hp-v6="stock-opname" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-4 pb-28 sm:p-6 sm:pb-28 md:p-10 md:pb-28">
 
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
 
@@ -2352,7 +2352,7 @@ export default function StockOpnameCountingPage() {
 
                   <div className="flex flex-wrap items-center gap-2">
 
-                    <h1 className="text-2xl font-bold sm:text-3xl">
+                    <h1 data-hp-v6-title="" data-hp-v4-title="" className="text-2xl font-bold sm:text-3xl">
 
                       {session?.session_code ??
 
@@ -2416,7 +2416,7 @@ export default function StockOpnameCountingPage() {
 
 
 
-                <Link
+                <Link data-hp-v4-link="opname"
 
                   href="/stock-opname"
 
@@ -2904,7 +2904,7 @@ export default function StockOpnameCountingPage() {
 
 
 
-                      <form
+                      <form data-hp-v6-form=""
 
                         onSubmit={
 
@@ -3010,7 +3010,7 @@ export default function StockOpnameCountingPage() {
 
 
 
-                            <form
+                            <form data-hp-v6-form=""
 
                               onSubmit={
 
@@ -3242,7 +3242,7 @@ export default function StockOpnameCountingPage() {
 
                           : "hidden max-h-[53vh] overflow-auto md:block"}>
 
-                          <table className={isCycleCount
+                          <table data-hp-v6-table="" className={isCycleCount
 
                             ? "w-full table-fixed text-left text-sm"
 

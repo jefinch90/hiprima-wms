@@ -47,8 +47,8 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+    <main data-hp-v4-login="" className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+      <div data-hp-v4-login-panel="" className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-8">
           <p className="text-sm font-medium text-slate-500">
             PT Prima Berkah Mulia
@@ -63,7 +63,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form
+        <form data-hp-v4-login-form=""
           onSubmit={handleLogin}
           className="space-y-5"
         >

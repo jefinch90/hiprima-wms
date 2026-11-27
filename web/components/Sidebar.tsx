@@ -285,7 +285,7 @@ export default function Sidebar() {
 
                 return (
                   <div key={item.key} className="min-w-0">
-                    <button
+                    <button data-hp-menu="group"
                       type="button"
                       aria-expanded={productionPlanningOpen}
                       aria-controls={planningSubmenuId}
@@ -324,7 +324,7 @@ export default function Sidebar() {
                               false);
 
                           return (
-                            <Link
+                            <Link data-hp-menu="link"
                               key={child.href}
                               href={child.href}
                               aria-current={
@@ -363,7 +363,7 @@ export default function Sidebar() {
                                       activeMenu(path)
                                     ) ?? false);
                                   return (
-                                    <Link
+                                    <Link data-hp-menu="link"
                                       key={child.href}
                                       href={child.href}
                                       aria-current={childActive ? "page" : undefined}
@@ -396,7 +396,7 @@ export default function Sidebar() {
                 activeMenu(item.href);
 
               return (
-                <Link
+                <Link data-hp-menu="link"
                   key={item.href}
                   href={item.href}
                   onClick={() =>
@@ -428,7 +428,7 @@ export default function Sidebar() {
             </div>
           </div>
 
-          <button
+          <button data-hp-menu="logout"
             type="button"
             onClick={handleLogout}
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -442,7 +442,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col overflow-hidden border-r border-slate-200 bg-white lg:flex">
+      <aside data-hp-sidebar="desktop" className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col overflow-hidden border-r border-slate-200 bg-white lg:flex">
         {renderMenuContent("desktop")}
       </aside>
 

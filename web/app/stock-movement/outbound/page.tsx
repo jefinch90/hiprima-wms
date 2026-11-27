@@ -423,7 +423,7 @@ export default function OutboundStockPage() {
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="stock-movement" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1400px]">
             <header className="mb-8">
               <p className="text-sm text-slate-500">
@@ -431,8 +431,8 @@ export default function OutboundStockPage() {
               </p>
 
               <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h1 className="text-3xl font-bold">
+                <div data-hp-v4-heading="">
+                  <h1 data-hp-v6-title="" data-hp-v4-title="" className="text-3xl font-bold">
                     Outbound Stock
                   </h1>
 
@@ -442,7 +442,7 @@ export default function OutboundStockPage() {
                   </p>
                 </div>
 
-                <Link
+                <Link data-hp-v4-link="transfer"
                   href="/stock-movement"
                   className="shrink-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
                 >
@@ -538,7 +538,7 @@ export default function OutboundStockPage() {
                       Outbound Lagi
                     </button>
 
-                    <Link
+                    <Link data-hp-v4-link="transfer"
                       href="/stock-movement"
                       className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
                     >
@@ -568,7 +568,7 @@ export default function OutboundStockPage() {
                       Step 1
                     </div>
 
-                    <h2 className="mt-1 text-lg font-semibold">
+                    <h2 data-hp-v6-section="" className="mt-1 text-lg font-semibold">
                       Cari SKU
                     </h2>
 
@@ -578,7 +578,7 @@ export default function OutboundStockPage() {
                     </p>
                   </div>
 
-                  <form
+                  <form data-hp-v6-form=""
                     onSubmit={handleSearch}
                     className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
                   >
@@ -738,7 +738,7 @@ export default function OutboundStockPage() {
                         Step 2
                       </div>
 
-                      <h2 className="mt-1 text-lg font-semibold">
+                      <h2 data-hp-v6-section="" className="mt-1 text-lg font-semibold">
                         Pilih Source Rack
                       </h2>
 
@@ -893,7 +893,7 @@ export default function OutboundStockPage() {
                           Step 3
                         </div>
 
-                        <h2 className="mt-1 text-lg font-semibold">
+                        <h2 data-hp-v6-section="" className="mt-1 text-lg font-semibold">
                           Detail Outbound
                         </h2>
                       </div>
@@ -924,7 +924,7 @@ export default function OutboundStockPage() {
                         </div>
                       </div>
 
-                      <form
+                      <form data-hp-v6-form=""
                         onSubmit={handleOutbound}
                         className="space-y-5"
                       >

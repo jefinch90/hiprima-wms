@@ -115,8 +115,8 @@ function SummaryCard({
   description?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm text-slate-500">
+    <div data-hp-v6-metric={title} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p data-hp-v6-metric-label="" className="text-sm text-slate-500">
         {title}
       </p>
 
@@ -227,48 +227,26 @@ export default function SalesDashboardPage() {
   const averageUnits =
     totalUnits / (report?.days || period);
 
-  const chartValues = daily.map(
-    (row) => num(row[chartMetric])
-  );
 
-  const chartMax = Math.max(1, ...chartValues);
 
-  const chartPoints = chartValues
-    .map((value, index) => {
-      const x =
-        24 +
-        (index * 952) /
-          Math.max(1, chartValues.length - 1);
 
-      const y =
-        200 -
-        (Math.max(0, value) / chartMax) * 165;
-
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-
-  const maxChannelUnits = Math.max(
-    1,
-    ...channels.map((row) => num(row.units_sold))
-  );
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900">
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-5 md:p-10">
+        <main data-hp-v6="sales" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-5 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1450px]">
 
-            <header className="mb-8">
+            <header data-hp-v6-hero="" className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
               <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="text-3xl font-bold tracking-tight">
+                  <h1 data-hp-v6-title="" className="text-3xl font-bold tracking-tight">
                     Sales Analytics Dashboard
                   </h1>
 
@@ -467,7 +445,7 @@ export default function SalesDashboardPage() {
                   <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
-                        <h2 className="text-lg font-bold">
+                        <h2 data-hp-v6-section="" className="text-lg font-bold">
                           Tren Penjualan Harian
                         </h2>
 
@@ -496,43 +474,7 @@ export default function SalesDashboardPage() {
                     </div>
 
                     <div className="mt-8 w-full min-w-0">
-                      <div
-                        role="img"
-                        aria-label={`Grafik ${chartMetric === "net_sales" ? "penjualan bersih" : "unit terjual"} harian`}
-                        className="w-full"
-                      >
-                        <svg
-                          viewBox="0 0 1000 240"
-                          preserveAspectRatio="none"
-                          className="h-56 w-full"
-                        >
-                          {[35, 90, 145, 200].map(
-                            (y) => (
-                              <line
-                                key={y}
-                                x1="24"
-                                x2="976"
-                                y1={y}
-                                y2={y}
-                                stroke="#e2e8f0"
-                                strokeWidth="1"
-                              />
-                            )
-                          )}
-
-                          {chartPoints && (
-                            <polyline
-                              points={chartPoints}
-                              fill="none"
-                              stroke="#0f172a"
-                              strokeWidth="3"
-                              strokeLinejoin="round"
-                              strokeLinecap="round"
-                              vectorEffect="non-scaling-stroke"
-                            />
-                          )}
-                        </svg>
-                      </div>
+                      <HPInteractiveSalesChart rows={daily} metric={chartMetric} />
 
                       <div className="flex justify-between gap-4 text-xs text-slate-500">
                         <span>
@@ -553,7 +495,7 @@ export default function SalesDashboardPage() {
                   </div>
 
                   <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-lg font-bold">
+                    <h2 data-hp-v6-section="" className="text-lg font-bold">
                       Sales Channel
                     </h2>
 
@@ -588,10 +530,9 @@ export default function SalesDashboardPage() {
                               <div
                                 className="h-full rounded-full bg-slate-900"
                                 style={{
-                                  width: `${
-                                    (units / maxChannelUnits) * 100
-                                  }%`,
-                                }}
+      width: Math.max(0,Math.min(100,percentage))+"%",
+      backgroundColor: hpChannelColor(channel.sales_channel)
+    }}
                               />
                             </div>
 
@@ -613,14 +554,14 @@ export default function SalesDashboardPage() {
 
                 <section className="mt-6 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-200 p-6">
-                    <h2 className="text-lg font-bold">Penjualan per Pengguna iSeller</h2>
+                    <h2 data-hp-v6-section="" className="text-lg font-bold">Penjualan per Pengguna iSeller</h2>
                     <p className="mt-1 text-xs text-slate-500">
                       Berdasarkan segmen dan periode analisis yang dipilih.
                       Pengguna dari import lama tanpa kolom Pengguna ditampilkan sebagai Tidak diketahui.
                     </p>
                   </div>
                   <div className="w-full overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-left text-sm">
+                    <table data-hp-v6-table="" className="w-full min-w-[720px] text-left text-sm">
                       <thead className="bg-slate-50 text-slate-600">
                         <tr>
                           <th className="p-4">Pengguna</th>
@@ -649,7 +590,7 @@ export default function SalesDashboardPage() {
                 <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-6">
                     <div>
-                      <h2 className="text-lg font-bold">
+                      <h2 data-hp-v6-section="" className="text-lg font-bold">
                         Top 20 SKU Terlaris
                       </h2>
 
@@ -664,7 +605,7 @@ export default function SalesDashboardPage() {
                   </div>
 
                   <div className="w-full overflow-x-auto">
-                    <table className="w-full min-w-[900px] text-left text-sm">
+                    <table data-hp-v6-table="" className="w-full min-w-[900px] text-left text-sm">
                       <thead className="bg-slate-50 text-slate-500">
                         <tr>
                           <th className="p-4">No</th>
@@ -750,6 +691,181 @@ export default function SalesDashboardPage() {
             )}
           </div>
         </main>
+      </div>
+    </div>
+  );
+}
+
+// HIPRIMA V6.2.1 INTERACTIVE SALES CHART
+
+function hpChannelColor(channel: string | null) {
+  const key=(channel || "").toLowerCase();
+  if(key.includes("tiktok")) return "#27243e";
+  if(key.includes("shopee")) return "#ea580c";
+  if(key.includes("bazar") || key.includes("event")) return "#8b5cf6";
+  if(key.includes("offline")) return "#0d9488";
+  if(key.includes("whatsapp")) return "#16a34a";
+  if(key.includes("tokopedia")) return "#15803d";
+  if(key.includes("lazada")) return "#4f46e5";
+  return "#64748b";
+}
+
+function HPInteractiveSalesChart({
+  rows,metric
+}:{
+  rows:DailyRow[];
+  metric:ChartMetric;
+}){
+  const [active,setActive]=useState<number|null>(null);
+
+  if(!rows.length)
+    return <p className="p-8 text-center text-slate-500">
+      Belum ada data penjualan.
+    </p>;
+
+  const values=rows.map(r=>num(r[metric]));
+  const isMoney=metric==="net_sales";
+  const color=isMoney?"#6554ce":"#0d9488";
+  const label=isMoney?"Penjualan Bersih":"Unit Terjual";
+
+  const W=800,L=84,R=780,T=30,B=270;
+  const min=Math.min(0,...values);
+  const max=Math.max(0,...values);
+  const raw=Math.max(1,max-min)/4;
+  const magnitude=Math.pow(10,Math.floor(Math.log10(raw)));
+  const step=Math.ceil(raw/magnitude)*magnitude;
+  const low=Math.floor(min/step)*step;
+  const high=Math.max(low+step,Math.ceil(max/step)*step);
+
+  const x=(i:number)=>rows.length===1
+    ?(L+R)/2:L+i*(R-L)/(rows.length-1);
+
+  const y=(v:number)=>B-(v-low)/(high-low)*(B-T);
+
+  const points=values.map((v,i)=>x(i)+","+y(v)).join(" ");
+
+  const area="M "+x(0)+" "+y(0)+" "+
+    values.map((v,i)=>"L "+x(i)+" "+y(v)).join(" ")+
+    " L "+x(values.length-1)+" "+y(0)+" Z";
+
+  const ticks=Array.from({
+    length:Math.round((high-low)/step)+1
+  },(_,i)=>low+i*step);
+
+  const selected=active===null?null:
+    Math.max(0,Math.min(active,rows.length-1));
+
+  const compact=new Intl.NumberFormat("id-ID",{
+    notation:"compact",maximumFractionDigits:1
+  });
+
+  function pick(clientX:number,rect:DOMRect){
+    if(rect.width<=0) return;
+    const px=(clientX-rect.left)/rect.width*W;
+    const ratio=Math.max(0,Math.min(1,(px-L)/(R-L)));
+    setActive(Math.round(ratio*(rows.length-1)));
+  }
+
+  return (
+    <div className="w-full min-w-0">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span style={{color}}>{label}</span>
+        <span>Geser untuk melihat nilai</span>
+      </div>
+
+      <div className="relative w-full"
+        role="group"
+        aria-label="Grafik interaktif. Gunakan tombol panah untuk memilih tanggal."
+        tabIndex={0}
+        onFocus={()=>setActive(v=>v??0)}
+        onBlur={()=>setActive(null)}
+        onKeyDown={e=>{
+          if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
+            e.preventDefault();
+            setActive(v=>Math.max(0,Math.min(
+              rows.length-1,(v??0)+(e.key==="ArrowRight"?1:-1)
+            )));
+          }
+          if(e.key==="Escape") setActive(null);
+        }}>
+
+        <svg viewBox="0 0 800 300"
+          className="block w-full select-none"
+          style={{height:"auto",touchAction:"pan-y",cursor:"crosshair"}}
+          onPointerMove={e=>pick(e.clientX,e.currentTarget.getBoundingClientRect())}
+          onPointerDown={e=>pick(e.clientX,e.currentTarget.getBoundingClientRect())}
+          onPointerLeave={e=>{
+            if(e.pointerType==="mouse") setActive(null);
+          }}>
+
+          <defs>
+            <linearGradient id="hp-sales-gradient"
+              x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity=".32"/>
+              <stop offset="100%" stopColor={color} stopOpacity=".02"/>
+            </linearGradient>
+          </defs>
+
+          {ticks.map(v=>(
+            <g key={v}>
+              <line x1={L} x2={R} y1={y(v)} y2={y(v)}
+                stroke="#e2e5ef" strokeDasharray="5 5"/>
+              <text x={L-10} y={y(v)+4}
+                textAnchor="end" fontSize="12" fill="#64748b">
+                {isMoney?"Rp ":""}{compact.format(v)}
+              </text>
+            </g>
+          ))}
+
+          <path d={area} fill="url(#hp-sales-gradient)"/>
+
+          <polyline points={points}
+            fill="none" stroke={color} strokeWidth="3"
+            strokeLinejoin="round" strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"/>
+
+          {values.map((v,i)=>(
+            <circle key={i} cx={x(i)} cy={y(v)}
+              r={rows.length>40?2:3.5}
+              fill={color} stroke="white" strokeWidth="1.5"/>
+          ))}
+
+          {selected!==null && (
+            <g>
+              <line x1={x(selected)} x2={x(selected)}
+                y1={T} y2={B} stroke={color}
+                strokeDasharray="5 4"/>
+              <circle cx={x(selected)} cy={y(values[selected])}
+                r="12" fill={color} opacity=".15"/>
+              <circle cx={x(selected)} cy={y(values[selected])}
+                r="6" fill={color} stroke="white" strokeWidth="2.5"/>
+            </g>
+          )}
+        </svg>
+
+        {selected!==null && (
+          <div className="pointer-events-none absolute top-0 z-10 w-max max-w-[90%] rounded-xl bg-violet-950 px-4 py-3 text-white shadow-lg"
+            style={{
+              left:Math.max(25,Math.min(75,x(selected)/W*100))+"%",
+              transform:"translateX(-50%)"
+            }}>
+            <div className="text-xs text-violet-200">
+              {dateLabel(rows[selected].sale_date)}
+            </div>
+            <div className="mt-1 text-xs">{label}</div>
+            <div className="mt-1 text-base font-bold">
+              {isMoney?money(values[selected]):integer(values[selected])+" pcs"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div aria-live="polite"
+        className="min-h-9 py-2 text-center text-xs font-medium text-violet-800">
+        {selected!==null
+          ?dateLabel(rows[selected].sale_date)+" - "+
+            (isMoney?money(values[selected]):integer(values[selected])+" pcs")
+          :""}
       </div>
     </div>
   );

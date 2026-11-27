@@ -438,7 +438,7 @@ function ScopedPage({
 
           <div className="mx-auto w-full min-w-0 max-w-[1400px]">
 
-            <header className="mb-8">
+            <header data-hp-hero="movement" className="mb-8">
 
               <p className="text-sm text-slate-500">
 
@@ -450,7 +450,7 @@ function ScopedPage({
 
               <div className="mt-1 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
 
-                <div className="min-w-0">
+                <div data-hp-movement-heading="" className="min-w-0">
 
                   <h1 className="text-3xl font-bold">
 
@@ -474,9 +474,9 @@ function ScopedPage({
 
                 {canWarehouseTransaction && (
 
-                  <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto xl:min-w-[720px]">
+                  <div data-hp-actions="" className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:w-auto xl:min-w-[720px]">
 
-                    <Link
+                    <Link data-hp-action="inbound" data-hp-desc="Penerimaan barang"
 
                       href="/stock-movement/inbound"
 
@@ -490,7 +490,7 @@ function ScopedPage({
 
 
 
-                    <Link
+                    <Link data-hp-action="outbound" data-hp-desc="Pengeluaran barang"
 
                       href="/stock-movement/outbound"
 
@@ -504,7 +504,7 @@ function ScopedPage({
 
 
 
-                    <Link
+                    <Link data-hp-action="transfer" data-hp-desc="Perpindahan stok"
 
                       href="/stock-movement/transfer"
 
@@ -515,7 +515,7 @@ function ScopedPage({
                       Transfer Stock
 
                     </Link>
-                    <Link
+                    <Link data-hp-action="warehouse" data-hp-desc="Operasional gudang"
                       href="/warehouse-control"
                       className="w-full rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-center text-sm font-semibold text-blue-900"
                     >
@@ -526,7 +526,7 @@ function ScopedPage({
 
                     {canAdjustment && (
 
-                      <Link
+                      <Link data-hp-action="adjustment" data-hp-desc="Koreksi saldo stok"
 
                         href="/stock-movement/adjustment"
 
@@ -542,7 +542,7 @@ function ScopedPage({
 
 
 
-                    <Link
+                    <Link data-hp-action="return-in" data-hp-desc="Penerimaan retur"
 
                       href="/stock-movement/return-in"
 
@@ -556,7 +556,7 @@ function ScopedPage({
 
 
 
-                    <Link
+                    <Link data-hp-action="return-out" data-hp-desc="Pengeluaran retur"
 
                       href="/stock-movement/return-out"
 

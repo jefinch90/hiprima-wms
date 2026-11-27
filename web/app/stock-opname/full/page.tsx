@@ -194,7 +194,7 @@ function ScopedPage({
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="stock-opname" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1000px]">
             <header className="mb-8">
               <p className="text-sm text-slate-500">
@@ -202,8 +202,8 @@ function ScopedPage({
               </p>
 
               <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h1 className="text-3xl font-bold">
+                <div data-hp-v4-heading="">
+                  <h1 data-hp-v6-title="" data-hp-v4-title="" className="text-3xl font-bold">
                     New Full Stock Opname
                   </h1>
 
@@ -213,7 +213,7 @@ function ScopedPage({
                   </p>
                 </div>
 
-                <Link
+                <Link data-hp-v4-link="opname"
                   href="/stock-opname"
                   className="shrink-0 rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-medium"
                 >
@@ -229,12 +229,12 @@ function ScopedPage({
               </div>
             )}
 
-            <form
+            <form data-hp-v6-form=""
               onSubmit={handleSubmit}
               className="space-y-6"
             >
               <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
-                <h2 className="font-semibold text-amber-900">
+                <h2 data-hp-v6-section="" className="font-semibold text-amber-900">
                   Sebelum memulai
                 </h2>
 

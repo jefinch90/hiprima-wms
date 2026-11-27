@@ -439,14 +439,14 @@ export default function UsersPage() {
       <div className="flex min-h-screen w-full max-w-full">
         <Sidebar />
 
-        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
+        <main data-hp-v6="users" data-hp-v4-main="" className="min-w-0 max-w-full flex-1 overflow-x-hidden p-6 md:p-10">
           <div className="mx-auto w-full min-w-0 max-w-[1500px]">
             <header className="mb-8">
               <p className="text-sm text-slate-500">
                 PT Prima Berkah Mulia
               </p>
 
-              <h1 className="mt-1 text-3xl font-bold">
+              <h1 data-hp-v6-title="" data-hp-v4-title="" className="mt-1 text-3xl font-bold">
                 Users
               </h1>
 
@@ -480,7 +480,7 @@ export default function UsersPage() {
             )}
 
             <section className="mb-6 w-full max-w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <form
+              <form data-hp-v6-form=""
                 onSubmit={handleSearch}
                 className="flex w-full min-w-0 flex-col gap-3 lg:flex-row"
               >
@@ -522,7 +522,7 @@ export default function UsersPage() {
             <section className="w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-col gap-2 border-b border-slate-200 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">
+                  <h2 data-hp-v6-section="" className="text-lg font-semibold">
                     User List
                   </h2>
 
@@ -560,7 +560,7 @@ export default function UsersPage() {
                         item.user_id;
 
                       return (
-                        <form
+                        <form data-hp-v6-form=""
                           key={
                             item.user_id
                           }
