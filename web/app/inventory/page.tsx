@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -128,6 +129,34 @@ export default function InventoryPage() {
     useState("");
 
 
+  const [warehouseId, setWarehouseId] = useState("");
+  const [warehouses, setWarehouses] = useState<Array<{
+    warehouse_id: string;
+    warehouse_key: string;
+    warehouse_name: string;
+    is_active: boolean;
+  }>>([]);
+  const [warehouseError, setWarehouseError] = useState("");
+  const requestSequence = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc("wms_list_warehouses");
+        if (!active) return;
+        if (error) {
+          setWarehouseError(error.message);
+          return;
+        }
+        setWarehouses(data ?? []);
+      } catch {
+        if (active) setWarehouseError("Gagal memuat daftar gudang.");
+      }
+    })();
+    return () => { active = false; };
+  }, [supabase]);
+
   const [urlReady, setUrlReady] =
     useState(false);
 
@@ -189,6 +218,8 @@ export default function InventoryPage() {
     useCallback(
       async () => {
 
+        const requestId = ++requestSequence.current;
+
         if (!urlReady) {
           return;
         }
@@ -214,6 +245,8 @@ export default function InventoryPage() {
           },
         } =
           await supabase.auth.getUser();
+
+        if (requestId !== requestSequence.current) return;
 
 
         if (!user) {
@@ -244,8 +277,9 @@ export default function InventoryPage() {
           await Promise.all([
 
             supabase.rpc(
-              "get_inventory_list",
+              "wms_inventory_by_warehouse",
               {
+                p_warehouse_id: warehouseId || null,
                 p_search:
                   search ||
                   null,
@@ -260,7 +294,7 @@ export default function InventoryPage() {
 
 
             supabase.rpc(
-              "get_inventory_valuation_summary"
+              "wms_valuation_by_warehouse", {p_warehouse_id: warehouseId || null}
             ),
 
           ]);
@@ -269,6 +303,8 @@ export default function InventoryPage() {
         // ------------------------------------------------------
         // INVENTORY ERROR
         // ------------------------------------------------------
+
+        if (requestId !== requestSequence.current) return;
 
         if (
           inventoryResult.error
@@ -408,6 +444,8 @@ export default function InventoryPage() {
                 variantIds
               );
 
+
+          if (requestId !== requestSequence.current) return;
 
           if (priceError) {
 
@@ -619,6 +657,7 @@ export default function InventoryPage() {
         search,
         supabase,
         urlReady,
+        warehouseId,
       ]
     );
 
@@ -1036,6 +1075,47 @@ export default function InventoryPage() {
               </p>
 
             </header>
+
+            <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="mb-3 text-sm font-semibold">Filter Gudang</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {warehouse_id:"",warehouse_name:"Semua Gudang",is_active:true},
+                  ...warehouses
+                ].map(w => (
+                  <button
+                    key={w.warehouse_id || "ALL"}
+                    type="button"
+                    onClick={() => {
+                      if (warehouseId === w.warehouse_id) return;
+                      requestSequence.current++;
+                      setWarehouseId(w.warehouse_id);
+                      setCurrentPage(1);
+                      setInventory([]);
+                      setSummary(null);
+                      setTotalCount(0);
+                      setLoading(true);
+                      updateUrl(1, search);
+                    }}
+                    aria-pressed={warehouseId === w.warehouse_id}
+                    className={"rounded-xl border px-4 py-2.5 text-sm font-medium " +
+                      (warehouseId === w.warehouse_id
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700")}
+                  >
+                    {w.warehouse_name}
+                    {!w.is_active ? " (Nonaktif)" : ""}
+                  </button>
+                ))}
+              </div>
+              {warehouseError && (
+                <p className="mt-2 text-sm text-red-700">{warehouseError}</p>
+              )}
+              <p className="mt-3 text-xs text-slate-500">
+                Seluruh ringkasan stok, HPP dan daftar SKU mengikuti gudang terpilih.
+              </p>
+              {loading && <p className="mt-2 text-xs text-slate-500">Memuat inventory...</p>}
+            </section>
 
 
             {/* ================================================= */}

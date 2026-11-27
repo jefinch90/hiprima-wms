@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import { appAlert, appConfirm } from "@/utils/appDialog";
 
@@ -14,6 +18,16 @@ import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
 
 export default function FullStockOpnamePage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
 
   const supabase = useMemo(
@@ -131,8 +145,7 @@ export default function FullStockOpnamePage() {
 
     const { data, error } =
       await supabase.rpc(
-        "create_stock_opname_session",
-        {
+        "wms_create_stock_opname_scoped", {p_warehouse_id: warehouseId,
           p_opname_type: "full",
           p_location_ids: null,
           p_notes:
@@ -196,7 +209,7 @@ export default function FullStockOpnamePage() {
 
                   <p className="mt-2 text-sm text-slate-500">
                     Hitung seluruh stok fisik
-                    pada semua rack aktif.
+                    pada semua rack aktif di gudang terpilih.
                   </p>
                 </div>
 
@@ -208,6 +221,7 @@ export default function FullStockOpnamePage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(processing || loading)}
 
             {errorMessage && (
               <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
@@ -226,7 +240,7 @@ export default function FullStockOpnamePage() {
 
                 <div className="mt-3 space-y-2 text-sm leading-6 text-amber-800">
                   <p>
-                    Full Stock Opname akan
+                    Full Stock Opname gudang terpilih akan
                     mengambil snapshot seluruh
                     inventory pada semua rack
                     aktif.

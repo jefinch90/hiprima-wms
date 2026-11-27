@@ -5,11 +5,6 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/utils/supabase/client";
 
-type StockAreaRow = {
-  stock_area: string | null;
-  total_qty: number | string | null;
-};
-
 type ValuationSummary = {
   normal_qty: number | string | null;
   defect_qty: number | string | null;
@@ -59,16 +54,13 @@ export default function Home() {
     }
 
     const [
-      stockAreaResult,
       valuationResult,
       productsResult,
       variantsResult,
       warehousesResult,
       stockAreasResult,
     ] = await Promise.all([
-      supabase.rpc("get_stock_by_area"),
-
-      supabase.rpc("get_inventory_valuation_summary"),
+      supabase.rpc("wms_valuation_by_warehouse", { p_warehouse_id: null }),
 
       supabase
         .from("products")
@@ -98,14 +90,6 @@ export default function Home() {
           head: true,
         }),
     ]);
-
-    if (stockAreaResult.error) {
-      setErrorMessage(
-        `Stock area error: ${stockAreaResult.error.message}`
-      );
-      setLoading(false);
-      return;
-    }
 
     if (valuationResult.error) {
       setErrorMessage(
@@ -147,38 +131,34 @@ export default function Home() {
       return;
     }
 
-    const stockAreas =
-      (stockAreaResult.data ?? []) as StockAreaRow[];
-
     const summaryRows =
       (valuationResult.data ?? []) as ValuationSummary[];
 
-    const summary =
-      summaryRows[0] ?? null;
+    const summary = summaryRows[0];
+
+    if (!summary) {
+      setErrorMessage("Ringkasan inventory tidak tersedia.");
+      setLoading(false);
+      return;
+    }
+
+    const normal = Number(summary.normal_qty ?? 0);
+    const defect = Number(summary.defect_qty ?? 0);
+    const reject = Number(summary.reject_qty ?? 0);
+    const total = Number(summary.total_qty ?? 0);
+
+    if (
+      ![normal, defect, reject, total].every(
+        n => Number.isSafeInteger(n) && n >= 0
+      ) ||
+      normal + defect + reject !== total
+    ) {
+      setErrorMessage("Rekonsiliasi jumlah inventory tidak sesuai.");
+      setLoading(false);
+      return;
+    }
 
     setValuation(summary);
-
-    const normal =
-      Number(
-        stockAreas.find(
-          (row) => row.stock_area === "NORMAL"
-        )?.total_qty ?? 0
-      );
-
-    const defect =
-      Number(
-        stockAreas.find(
-          (row) => row.stock_area === "DEFECT"
-        )?.total_qty ?? 0
-      );
-
-    const reject =
-      Number(
-        stockAreas.find(
-          (row) => row.stock_area === "REJECT"
-        )?.total_qty ?? 0
-      );
-
     setNormalStock(normal);
     setDefectStock(defect);
     setRejectStock(reject);
@@ -564,7 +544,7 @@ export default function Home() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Ringkasan stok berdasarkan area inventory
+                  Ringkasan stok seluruh gudang berdasarkan area inventory
                 </p>
               </div>
 

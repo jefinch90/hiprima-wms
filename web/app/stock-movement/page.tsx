@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 
 
@@ -102,6 +106,16 @@ const movementLabels: Record<string, string> = {
 
 
 export default function StockMovementPage() {
+  return <WarehouseScope history={true} render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
 
   const router = useRouter();
 
@@ -235,9 +249,7 @@ export default function StockMovementPage() {
 
     const { data, error } = await supabase.rpc(
 
-      "get_stock_movements",
-
-      {
+      "wms_stock_movements_scoped", {p_warehouse_id: warehouseId || null,
 
         p_search: search || null,
 
@@ -503,6 +515,12 @@ export default function StockMovementPage() {
                       Transfer Stock
 
                     </Link>
+                    <Link
+                      href="/warehouse-control"
+                      className="w-full rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-center text-sm font-semibold text-blue-900"
+                    >
+                      Warehouse Control Center
+                    </Link>
 
 
 
@@ -569,6 +587,7 @@ export default function StockMovementPage() {
               </div>
 
             </header>
+{renderWarehousePicker(false)}
 
 
 

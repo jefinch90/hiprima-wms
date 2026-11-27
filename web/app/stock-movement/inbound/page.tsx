@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -92,6 +96,16 @@ function suggestRacks(options: Record<Qc, Rack[]>) {
 }
 
 export default function InboundMultiSkuPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [backendReady, setBackendReady] = useState(false);
@@ -151,7 +165,7 @@ export default function InboundMultiSkuPage() {
     try {
       const [product, ...rackResponses] = await Promise.all([
         supabase.rpc("get_inbound_variant", {p_variant_id: variantId}),
-        ...qcs.map(qc => supabase.rpc("get_inbound_destination_locations", {p_variant_id: variantId, p_area_code: qc}))
+        ...qcs.map(qc => supabase.rpc("wms_scoped_racks", {p_warehouse_id: warehouseId, p_variant_id: variantId, p_area_code: qc}))
       ]);
       if (product.error) throw product.error;
       const sku = ((product.data ?? []) as Sku[])[0];
@@ -165,7 +179,7 @@ export default function InboundMultiSkuPage() {
       let rackTip: RackTip | null = null;
       let rackTipError = false;
       try {
-        const suggestion = await supabase.rpc("wms_inbound_rack_recommendations", {
+        const suggestion = await supabase.rpc("wms_rack_tips_scoped", {p_warehouse_id: warehouseId,
           p_variant_id: variantId, p_area_code: "NORMAL"
         });
         if (suggestion.error || !Array.isArray(suggestion.data)) {
@@ -223,7 +237,7 @@ export default function InboundMultiSkuPage() {
       };
     });
     const summary = lines.map(l => `${l.sku.sku}: ${parsed(l)!.total} pcs`).join("\n");
-    if (!window.confirm(`KONFIRMASI PENERIMAAN LIVE\nVendor: ${vendorName}\nSurat Jalan: ${sj.trim()}\n${lines.length} SKU / ${totalPcs} pcs\n\n${summary}\n\nStok LIVE bertambah jika seluruh baris berhasil. Lanjutkan?`)) return;
+    if (!window.confirm(`KONFIRMASI PENERIMAAN LIVE\nGudang: ${warehouseName}\nVendor: ${vendorName}\nSurat Jalan: ${sj.trim()}\n${lines.length} SKU / ${totalPcs} pcs\n\n${summary}\n\nStok LIVE bertambah jika seluruh baris berhasil. Lanjutkan?`)) return;
     setBusy(true); setErrorText("");
     try {
       const {data, error} = await supabase.rpc("wms_receive_inbound_document", {
@@ -263,6 +277,7 @@ export default function InboundMultiSkuPage() {
               </div>
               <Link href="/stock-movement" className={secondary}>Kembali ke Movement</Link>
             </header>
+{renderWarehousePicker(busy || loading || !!posted || lines.length > 0)}
             {!backendReady && <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
               Backend V4.3M belum terpasang atau tidak dapat diakses. Tombol konfirmasi terkunci. Jangan memasukkan stok lewat jalur lain.
             </div>}
@@ -366,7 +381,7 @@ export default function InboundMultiSkuPage() {
                                 </button> : <span className="font-semibold">Rak dipilih</span>}
                             </div>}
                           {qc === "NORMAL" && qty > 0 && line.rackTipError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800 sm:col-span-3"><b>Gagal membaca rekomendasi rak.</b> Periksa koneksi atau tambahkan ulang SKU untuk mencoba kembali. Pilihan rak dari daftar tetap dapat digunakan setelah pemeriksaan fisik.</p>}
-                          {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && !line.rackTip && <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3"><b>Tidak ditemukan rekomendasi rak.</b> Tidak ada stok aktif, histori tujuan aktif, atau lokasi import yang cocok secara unik. Silakan pilih lokasi secara manual.</p>}
+                          {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && !line.rackTip && <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3"><b>Tidak ditemukan rekomendasi rak.</b> Tidak ada stok atau histori rak aktif di gudang terpilih. Silakan pilih lokasi secara manual.</p>}
                           {qc === "NORMAL" && qty > 0 && !candidate && !line.rackTipError && line.rackTip?.recommendation_reason === "CURRENT" && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-3">Data stok berubah saat dibaca. Tambahkan ulang SKU untuk memuat lokasi terbaru.</p>}
                           {qty > 0 && options.length === 0 && <p className="text-xs text-red-700 sm:col-span-3">Tidak ada rak aktif untuk {qc}; hubungi Admin.</p>}
                         </div>;

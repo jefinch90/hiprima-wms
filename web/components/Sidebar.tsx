@@ -151,6 +151,11 @@ export default function Sidebar() {
       visible: true,
     },
     {
+      label: "Warehouse Control Center",
+      href: "/warehouse-control",
+      visible: true,
+    },
+    {
       label: "Stock Movement",
       href: "/stock-movement",
       visible: true,

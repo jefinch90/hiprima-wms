@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import {
   FormEvent,
@@ -42,6 +46,16 @@ type AdjustmentResult = {
 };
 
 export default function StockAdjustmentPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -281,8 +295,7 @@ export default function StockAdjustmentPage() {
       data: locationData,
       error: locationError,
     } = await supabase.rpc(
-      "get_adjustment_locations",
-      {
+      "wms_scoped_racks", {p_warehouse_id: warehouseId,
         p_variant_id: variantId,
       }
     );
@@ -486,6 +499,7 @@ export default function StockAdjustmentPage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(processing || searching || loadingVariant || !!successResult)}
 
             {successResult &&
               selectedVariant &&

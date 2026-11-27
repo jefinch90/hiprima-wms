@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import {
   FormEvent,
@@ -42,6 +46,16 @@ type ReturnResult = {
 type QcResult = "NORMAL" | "DEFECT" | "REJECT";
 
 export default function ReturnInPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -224,11 +238,10 @@ export default function ReturnInPage() {
     setLoadingLocations(true);
 
     const { data, error } = await supabase.rpc(
-      "get_return_in_destination_locations",
-      {
+      "wms_scoped_racks", {p_warehouse_id: warehouseId,
         p_variant_id:
           selectedVariant.variant_id,
-        p_qc_result: result,
+        p_area_code: result,
       }
     );
 
@@ -391,6 +404,7 @@ export default function ReturnInPage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(processing || searching || loadingVariant || loadingLocations || !!successResult)}
 
             {successResult &&
               selectedVariant &&

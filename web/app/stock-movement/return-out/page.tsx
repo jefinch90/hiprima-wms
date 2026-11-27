@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import {
   FormEvent,
@@ -40,6 +44,16 @@ type ReturnOutResult = {
 };
 
 export default function ReturnOutPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -194,8 +208,7 @@ export default function ReturnOutPage() {
       data: sourceData,
       error: sourceError,
     } = await supabase.rpc(
-      "get_return_out_source_locations",
-      {
+      "wms_scoped_racks", {p_warehouse_id: warehouseId, p_positive_only: true,
         p_variant_id: variantId,
       }
     );
@@ -380,6 +393,7 @@ export default function ReturnOutPage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(processing || searching || loadingVariant || !!successResult)}
 
             {successResult &&
               selectedVariant &&

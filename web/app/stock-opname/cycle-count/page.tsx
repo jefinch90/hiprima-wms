@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import { appAlert, appConfirm } from "@/utils/appDialog";
 
@@ -66,6 +70,16 @@ function getAreaType(
 }
 
 export default function CycleCountPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
 
   const supabase = useMemo(
@@ -157,7 +171,7 @@ export default function CycleCountPage() {
 
       const { data, error } =
         await supabase.rpc(
-          "get_stock_opname_locations"
+          "wms_stock_opname_locations_scoped", {p_warehouse_id: warehouseId}
         );
 
       if (!mounted) return;
@@ -360,8 +374,7 @@ export default function CycleCountPage() {
 
     const { data, error } =
       await supabase.rpc(
-        "create_stock_opname_session",
-        {
+        "wms_create_stock_opname_scoped", {p_warehouse_id: warehouseId,
           p_opname_type:
             "cycle_count",
 
@@ -470,6 +483,7 @@ export default function CycleCountPage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(processing || loading)}
 
             {errorMessage && (
               <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

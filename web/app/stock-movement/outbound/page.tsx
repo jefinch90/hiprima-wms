@@ -31,6 +31,9 @@ type SourceLocationRow = {
   area_code: string;
   area_name: string;
   qty_on_hand: number;
+  warehouse_key: string;
+  warehouse_id: string;
+  warehouse_name: string;
 };
 
 type TransactionType =
@@ -69,6 +72,7 @@ export default function OutboundStockPage() {
   const [transactionType, setTransactionType] =
     useState<TransactionType | "">("");
   const [salesChannel, setSalesChannel] = useState("");
+  const [loadingSources, setLoadingSources] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
   const [notes, setNotes] = useState("");
@@ -172,6 +176,7 @@ export default function OutboundStockPage() {
   async function handleSelectVariant(
     variantId: string
   ) {
+    setSelectedVariant(null);
     setLoadingVariant(true);
     setErrorMessage("");
     setSuccessResult(null);
@@ -209,30 +214,66 @@ export default function OutboundStockPage() {
       return;
     }
 
-    const {
-      data: sourceData,
-      error: sourceError,
-    } = await supabase.rpc(
-      "get_outbound_source_locations",
-      {
-        p_variant_id: variantId,
-      }
-    );
+    setSelectedVariant(variant);
+    setLoadingVariant(false);
+  }
 
-    if (sourceError) {
-      setErrorMessage(sourceError.message);
-      setLoadingVariant(false);
+  function clearWarehouseSource() {
+    setSelectedSource(null);
+    setSourceLocations([]);
+    setQuantity("");
+    setErrorMessage("");
+    setConfirmOpen(false);
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    setSourceLocations([]);
+    setSelectedSource(null);
+    setQuantity("");
+
+    if (!selectedVariant || !transactionType ||
+        (transactionType === "sale" && !salesChannel)) {
+      setLoadingSources(false);
       return;
     }
 
-    setSelectedVariant(variant);
+    setLoadingSources(true);
 
-    setSourceLocations(
-      (sourceData ?? []) as SourceLocationRow[]
-    );
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc(
+          "wms_get_outbound_source_locations",
+          {
+            p_variant_id: selectedVariant.variant_id,
+            p_transaction_type: transactionType,
+            p_sales_channel: transactionType === "sale"
+              ? salesChannel : null,
+          }
+        );
 
-    setLoadingVariant(false);
-  }
+        if (!active) return;
+
+        if (error) {
+          setErrorMessage(error.message);
+          return;
+        }
+
+        setSourceLocations(
+          (data ?? []) as SourceLocationRow[]
+        );
+      } catch {
+        if (active) {
+          setErrorMessage("Gagal memuat rak gudang.");
+        }
+      } finally {
+        if (active) setLoadingSources(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [selectedVariant, transactionType, salesChannel, supabase]);
 
   function handleOutbound(
     event: FormEvent<HTMLFormElement>
@@ -247,7 +288,8 @@ export default function OutboundStockPage() {
       return;
     }
 
-    if (!selectedSource) {
+    if (loadingSources || !selectedSource ||
+        !sourceLocations.some(r => r.location_id === selectedSource.location_id)) {
       setErrorMessage("Source rack wajib dipilih.");
       return;
     }
@@ -304,6 +346,8 @@ export default function OutboundStockPage() {
     if (
       !selectedVariant ||
       !selectedSource ||
+      loadingSources ||
+      !sourceLocations.some(r => r.location_id === selectedSource.location_id) ||
       !transactionType
     ) {
       setConfirmOpen(false);
@@ -468,7 +512,7 @@ export default function OutboundStockPage() {
                       </div>
 
                       <div className="mt-1 font-semibold">
-                        {selectedSource.location_code}
+                        {selectedSource.warehouse_name} / {selectedSource.location_code}
                       </div>
                     </div>
 
@@ -623,7 +667,7 @@ export default function OutboundStockPage() {
                                   </div>
 
                                   <div className="mt-2 text-xs text-slate-500">
-                                    Normal stock:{" "}
+                                    Normal stock (semua gudang):{" "}
                                     <span className="font-semibold text-slate-900">
                                       {formatNumber(
                                         item.total_qty
@@ -680,7 +724,7 @@ export default function OutboundStockPage() {
                       </div>
 
                       <div className="mt-3 inline-flex rounded-lg bg-slate-100 px-3 py-2 text-sm">
-                        Normal stock:{" "}
+                        Normal stock (semua gudang):{" "}
                         <span className="ml-1 font-semibold">
                           {formatNumber(
                             selectedVariant.total_qty
@@ -703,7 +747,75 @@ export default function OutboundStockPage() {
                         akan dikeluarkan.
                       </p>
 
-                      {sourceLocations.length > 0 ? (
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+  <label className="text-sm font-medium">
+    Transaction Type
+    <select
+      value={transactionType}
+      disabled={processing || confirmOpen}
+      onChange={e => {
+        clearWarehouseSource();
+        setTransactionType(e.target.value as TransactionType | "");
+        setSalesChannel("");
+      }}
+      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+    >
+      <option value="">Pilih Transaction Type</option>
+      <option value="sale">Sale</option>
+      <option value="sample">Sample</option>
+      <option value="giveaway">Giveaway</option>
+      <option value="internal_use">Internal Use</option>
+      <option value="other">Other</option>
+    </select>
+  </label>
+
+  {transactionType === "sale" && (
+    <label className="text-sm font-medium">
+      Sales Channel
+      <select
+        value={salesChannel}
+        disabled={processing || confirmOpen}
+        onChange={e => {
+          clearWarehouseSource();
+          setSalesChannel(e.target.value);
+        }}
+        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+      >
+        <option value="">Pilih Sales Channel</option>
+        {[
+          "TikTok Shop","Shopee","Tokopedia","Lazada",
+          "Website","WhatsApp","Offline Store",
+          "Bazaar/Event","Wholesale/Reseller","Other"
+        ].map(channel => (
+          <option key={channel} value={channel}>
+            {channel}
+          </option>
+        ))}
+      </select>
+    </label>
+  )}
+</div>
+
+{transactionType === "sale" && salesChannel && (
+  <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+    <p className="text-xs text-blue-700">Gudang Asal - Otomatis</p>
+    <p className="mt-1 font-semibold text-blue-900">
+      {salesChannel === "Offline Store"
+        ? "Gudang Offline Store"
+        : "Gudang Utama"}
+    </p>
+  </div>
+)}
+
+{!transactionType || (transactionType === "sale" && !salesChannel) ? (
+  <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+    Pilih jenis transaksi dan sales channel terlebih dahulu.
+  </p>
+) : loadingSources ? (
+  <p className="mt-4 text-sm text-slate-500">
+    Memuat rak gudang...
+  </p>
+) : sourceLocations.length > 0 ? (
                         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           {sourceLocations.map(
                             (location) => {
@@ -755,7 +867,7 @@ export default function OutboundStockPage() {
                                   <div className="mt-3 text-xs text-slate-500">
                                     Area:{" "}
                                     {
-                                      location.area_code
+                                      location.warehouse_name + " / " + location.area_code
                                     }
                                   </div>
                                 </button>
@@ -816,68 +928,6 @@ export default function OutboundStockPage() {
                         onSubmit={handleOutbound}
                         className="space-y-5"
                       >
-                        <div>
-                          <label className="mb-2 block text-sm font-medium">
-                            Transaction Type
-                            <span className="ml-1 text-red-500">
-                              *
-                            </span>
-                          </label>
-
-                          <select
-                            required
-                            value={transactionType}
-                            onChange={(event) => {
-                              const value = event.target.value as TransactionType | "";
-                              setTransactionType(value);
-                              if (value !== "sale") {
-                                setSalesChannel("");
-                              }
-                              setErrorMessage("");
-                            }}
-                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
-                          >
-                            <option value="">Pilih Transaction Type</option>
-                            <option value="sale">Sale</option>
-                            <option value="sample">Sample</option>
-                            <option value="giveaway">Giveaway</option>
-                            <option value="internal_use">Internal Use</option>
-                            <option value="other">Other</option>
-                          </select>
-                        </div>
-
-                        {transactionType === "sale" && (
-                          <div>
-                            <label className="mb-2 block text-sm font-medium">
-                              Sales Channel
-                              <span className="ml-1 text-red-500">
-                                *
-                              </span>
-                            </label>
-
-                            <select
-                              required
-                              value={salesChannel}
-                              onChange={(event) =>
-                                setSalesChannel(event.target.value)
-                              }
-                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-500"
-                            >
-                              <option value="">Pilih Sales Channel</option>
-                              <option value="TikTok Shop">TikTok Shop</option>
-                              <option value="Shopee">Shopee</option>
-                              <option value="Tokopedia">Tokopedia</option>
-                              <option value="Lazada">Lazada</option>
-                              <option value="Website">Website</option>
-                              <option value="WhatsApp">WhatsApp</option>
-                              <option value="Offline Store">Offline Store</option>
-                              <option value="Bazaar/Event">Bazaar/Event</option>
-                              <option value="Wholesale/Reseller">Wholesale/Reseller</option>
-                              <option value="Other">Other</option>
-                            </select>
-                          </div>
-                        )}
-
                         <div>
                           <label className="mb-2 block text-sm font-medium">
                             Quantity
@@ -1055,7 +1105,7 @@ export default function OutboundStockPage() {
                     </span>
 
                     <span className="text-right text-sm font-semibold">
-                      {selectedSource.location_code}
+                      {selectedSource.warehouse_name} / {selectedSource.location_code}
                     </span>
                   </div>
 
@@ -1263,7 +1313,7 @@ export default function OutboundStockPage() {
                     </div>
 
                     <div className="mt-1 font-semibold">
-                      {selectedSource.location_code}
+                      {selectedSource.warehouse_name} / {selectedSource.location_code}
                     </div>
                   </div>
 

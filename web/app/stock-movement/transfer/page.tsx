@@ -1,4 +1,8 @@
 "use client";
+import {
+  WarehouseScope,
+  type WarehousePageProps
+} from "@/components/WarehouseScope";
 
 import {
   FormEvent,
@@ -49,6 +53,16 @@ type TransferResult = {
 };
 
 export default function TransferStockPage() {
+  return <WarehouseScope render={props =>
+    <ScopedPage key={props.warehouseId || "ALL"} {...props} />
+  } />;
+}
+
+function ScopedPage({
+  warehouseId,
+  warehouseName,
+  renderWarehousePicker
+}: WarehousePageProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -185,8 +199,7 @@ export default function TransferStockPage() {
 
     const { data: sourceData, error: sourceError } =
       await supabase.rpc(
-        "get_transfer_source_locations",
-        {
+        "wms_scoped_racks", {p_warehouse_id: warehouseId, p_positive_only: true,
           p_variant_id: variantId,
         }
       );
@@ -354,6 +367,7 @@ export default function TransferStockPage() {
                 </Link>
               </div>
             </header>
+{renderWarehousePicker(transferring || searching || loadingVariant || loadingDestination || !!successResult)}
 
             {successResult && selectedVariant && (
               <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
